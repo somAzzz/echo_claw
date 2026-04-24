@@ -4,11 +4,8 @@ import asyncio
 import base64
 import json
 import logging
-import re
 
-import emoji
 import websockets
-from pydantic import BaseModel, field_validator
 from websockets.server import WebSocketServerProtocol
 
 from src.config import Config
@@ -23,34 +20,10 @@ from src.protocol.ws_protocol import (
     build_text,
 )
 from src.state_machine import StateMachine
+from src.utils.text_utils import filter_tts_text
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Asterisk pattern for markdown bold/italic
-ASTERISK_PATTERN = re.compile(r"\*+([^*]+)\*+")
-
-
-class TTSOutputText(BaseModel):
-    """Model for validated TTS output text."""
-    text: str
-
-    @field_validator('text')
-    @classmethod
-    def clean_text(cls, v: str) -> str:
-        # Remove markdown asterisks (bold/italic markers like **text** -> text)
-        v = ASTERISK_PATTERN.sub(r"\1", v)
-        # Remove emojis using the emoji library
-        v = emoji.replace_emoji(v, replace="")
-        # Normalize whitespace
-        v = " ".join(v.split())
-        return v.strip()
-
-
-def filter_tts_text(text: str) -> str:
-    """Filter text for TTS using Pydantic validation."""
-    validated = TTSOutputText(text=text)
-    return validated.text
 
 
 async def handle_browser(websocket: WebSocketServerProtocol) -> None:
@@ -185,6 +158,7 @@ async def run_llm_to_tts(
 ) -> None:
     """Run LLM streaming followed by TTS synthesis."""
     logger.info(f"run_llm_to_tts called: user_text='{user_text}', prompt='{prompt[:50] if prompt else 'empty'}...'")
+
     # LLM streaming with llm_chunk messages
     messages = [{"role": "user", "content": user_text}]
 

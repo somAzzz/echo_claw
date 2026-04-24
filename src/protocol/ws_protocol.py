@@ -170,25 +170,6 @@ def build_llm_chunk(text: str, session_id: str, turn_id: int) -> str:
     })
 
 
-def build_tts_audio(data: str, session_id: str, turn_id: int) -> str:
-    """Build a TTS audio chunk message for browser client.
-
-    Args:
-        data: Base64 encoded PCM audio.
-        session_id: Session identifier.
-        turn_id: Turn identifier.
-
-    Returns:
-        JSON string with tts_audio directive.
-    """
-    return json.dumps({
-        "type": "tts_audio",
-        "data": data,
-        "session_id": session_id,
-        "turn_id": turn_id,
-    })
-
-
 def build_tts_complete(data: str, session_id: str, turn_id: int) -> str:
     """Build a TTS complete message with full audio data.
 

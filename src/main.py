@@ -17,12 +17,10 @@ import asyncio
 import json
 import logging
 import os
-import re
 import threading
 from datetime import datetime
 from typing import Optional
 
-import emoji
 import websockets
 from websockets.server import WebSocketServerProtocol
 
@@ -30,7 +28,6 @@ from src.config import Config
 from src.http_api import app as http_app
 from src.browser_ws_handler import handle_browser
 from src.memory import get_session, cleanup_session, summarize_async
-from src.memory.session import PendingTurn
 from src.pipeline.asr import ASRClient
 from src.pipeline.llm import LLMClient
 from src.pipeline.tts import TTSClient
@@ -43,6 +40,7 @@ from src.protocol.ws_protocol import (
     parse_message,
 )
 from src.state_machine import PendingTurn, State, StateMachine
+from src.utils.text_utils import filter_tts_text
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -53,23 +51,6 @@ MAX_BUFFER_CHARS = 200
 
 # Debug output directory (set via environment variable)
 DEBUG_OUTPUT_DIR = os.environ.get("DEBUG_OUTPUT_DIR")
-
-# Asterisk pattern for markdown bold/italic
-ASTERISK_PATTERN = re.compile(r"\*+([^*]+)\*+")
-
-
-def filter_tts_text(text: str) -> str:
-    """Filter text for TTS (markdown asterisks + emojis + whitespace).
-
-    Synchronized with browser_ws_handler.py implementation.
-    """
-    # Remove markdown asterisks (bold/italic markers like **text** -> text)
-    text = ASTERISK_PATTERN.sub(r"\1", text)
-    # Remove emojis using the emoji library
-    text = emoji.replace_emoji(text, replace="")
-    # Normalize whitespace
-    text = " ".join(text.split())
-    return text.strip()
 
 
 async def send_json(websocket: WebSocketServerProtocol, data: dict | str) -> None:

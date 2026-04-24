@@ -1,18 +1,7 @@
-"""Memory session management with Turn, Summary, and PendingTurn data structures."""
+"""Memory session management with Turn, Summary, and Session data structures."""
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
-
-
-@dataclass
-class PendingTurn:
-    """Represents an ongoing turn that is still being processed."""
-    turn_id: str
-    session_id: str
-    audio_chunks: list[bytes] = field(default_factory=list)
-    user_text: str | None = None
-    started_at: datetime = field(default_factory=datetime.now)
 
 
 @dataclass
