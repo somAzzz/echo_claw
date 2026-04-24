@@ -54,9 +54,16 @@ memory:
   token_threshold: 8000    # chars, trigger summary if estimated tokens exceed this
   max_summary_length: 300  # max chars for global_summary (conservative ~300 tokens)
 
+
   # Session persistence (for debugging/sessions)
   session_dir: "./memory/sessions"
   summary_dir: "./memory/summaries"
+
+
+  # Global memory (cross-session context with BM25 retrieval)
+  global_dir: "./memory/global"
+  global_top_k: 3          # max files to retrieve per query
+  global_max_chars: 2000   # soft cap before Map-Reduce truncation
 
 backpressure:
   asr_queue_max: 100      # ASR 输入队列最大长度

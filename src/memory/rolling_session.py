@@ -53,16 +53,26 @@ class VoiceSession:
             total_chars += len(turn.content)
         return total_chars // 2
 
-    def build_prompt(self, system_prompt: str, current_input: str) -> List[dict]:
+    def build_prompt(self, system_prompt: str, current_input: str, global_context: str = "") -> List[dict]:
         """Build messages for LLM with memory context.
 
         Prompt structure:
-        [System Prompt] + [global_summary] + [recent_turns] + [current_input]
+        [System Prompt] + [global_context] + [global_summary] + [recent_turns] + [current_input]
+
+        Args:
+            system_prompt: Base system prompt
+            current_input: Current user input
+            global_context: Optional cross-session global memory (BM25 retrieved)
         """
         messages = []
 
         # Add memory context if exists
-        if self.global_summary and self.global_summary != "暂无早期记忆记录。":
+        if global_context:
+            messages.append({
+                "role": "system",
+                "content": f"[全局记忆]\n{global_context}\n\n【重要】当全局记忆中的信息与当前对话冲突时，以时间更近的记录为准。"
+            })
+        elif self.global_summary and self.global_summary != "暂无早期记忆记录。":
             messages.append({
                 "role": "system",
                 "content": f"[记忆上下文]\n{self.global_summary}"

@@ -45,6 +45,9 @@ class MemoryConfig:
     max_rounds: int = 5
     idle_timeout: int = 120
     max_recent_summaries: int = 3
+    global_dir: str = "./memory/global"
+    global_top_k: int = 3
+    global_max_chars: int = 2000
 
 
 @dataclass
@@ -147,6 +150,9 @@ class Config:
             max_rounds=int(os.environ.get("MEMORY_MAX_ROUNDS", memory_data.get("max_rounds", 5))),
             idle_timeout=int(os.environ.get("MEMORY_IDLE_TIMEOUT", memory_data.get("idle_timeout", 120))),
             max_recent_summaries=int(os.environ.get("MEMORY_MAX_RECENT_SUMMARIES", memory_data.get("max_recent_summaries", 3))),
+            global_dir=os.environ.get("MEMORY_GLOBAL_DIR", memory_data.get("global_dir", "./memory/global")),
+            global_top_k=int(os.environ.get("MEMORY_GLOBAL_TOP_K", memory_data.get("global_top_k", 3))),
+            global_max_chars=int(os.environ.get("MEMORY_GLOBAL_MAX_CHARS", memory_data.get("global_max_chars", 2000))),
         )
 
         # Load Server config

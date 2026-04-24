@@ -27,7 +27,7 @@ from websockets.server import WebSocketServerProtocol
 from src.config import Config
 from src.http_api import app as http_app
 from src.browser_ws_handler import handle_browser
-from src.memory import get_session, cleanup_session, summarize_async
+from src.memory import get_session, cleanup_session, summarize_async, get_global_memory
 from src.pipeline.asr import ASRClient
 from src.pipeline.llm import LLMClient
 from src.pipeline.tts import TTSClient
@@ -120,7 +120,14 @@ async def run_pipeline(
         logger.info(f"Debug: ASR output saved to {asr_file}")
 
     # Step 3: Get LLM context using memory system
-    messages = voice_session.build_prompt("", user_text)
+    # Check for global memory trigger and retrieve cross-session context
+    global_memory = get_global_memory()
+    global_context = ""
+    if global_memory.has_trigger(user_text):
+        global_context = await global_memory.retrieve(user_text)
+        logger.info(f"Global memory retrieved: {len(global_context)} chars")
+
+    messages = voice_session.build_prompt("", user_text, global_context)
 
     text_buffer = ""
     full_llm_response = ""  # Accumulate the complete LLM response
@@ -195,6 +202,9 @@ async def run_pipeline(
         # Add turn to memory system and trigger async summary
         voice_session.add_turn("user", user_text)
         voice_session.add_turn("assistant", full_llm_response, voice_session, summarize_async)
+
+        # Also persist to global memory on session_end
+        # (summary will be written when session ends)
 
     except Exception as e:
         logger.error(f"Pipeline error: {e}")
@@ -300,6 +310,14 @@ async def handle_esp32(websocket: WebSocketServerProtocol) -> None:
             elif msg_type == "session_end":
                 sm.handle_message(parsed)
                 if voice_session:
+                    # Write session summary to global memory before cleanup
+                    if voice_session.global_summary and voice_session.global_summary != "暂无早期记忆记录。":
+                        global_memory = get_global_memory()
+                        await global_memory.write(
+                            voice_session.session_id,
+                            voice_session.global_summary,
+                        )
+                        logger.info(f"Session summary written to global memory: {voice_session.session_id}")
                     cleanup_session(voice_session.session_id)
                     voice_session = None
                 session_id = ""
