@@ -25,6 +25,18 @@ TRIGGER_PATTERNS = [
 ]
 
 
+def tokenize_cn(text: str) -> List[str]:
+    """Character bigram tokenization for Chinese + English word split.
+
+    Chinese: character bigrams for sub-character matching.
+    English/Python: word-level matching on whitespace.
+    """
+    chars = list(text.lower())
+    bigrams = [''.join(chars[i:i+2]) for i in range(len(chars)-1)]
+    words = text.lower().split()
+    return bigrams + words
+
+
 class GlobalRetriever:
     """BM25 retriever for cross-session global memory."""
 
@@ -41,6 +53,9 @@ class GlobalRetriever:
     def retrieve(self, query: str, top_k: int = 3) -> List[str]:
         """Retrieve top-k most relevant global memory file contents.
 
+        Only returns files with a non-zero BM25 score.
+        Tie-breaking by filename descending = newer session first.
+
         Args:
             query: User input text
             top_k: Maximum number of files to return
@@ -51,7 +66,6 @@ class GlobalRetriever:
         if not os.path.isdir(self.global_dir):
             return []
 
-        # Load all .md files
         files = sorted(
             f for f in os.listdir(self.global_dir)
             if f.endswith(".md")
@@ -74,27 +88,28 @@ class GlobalRetriever:
         if not corpus:
             return []
 
-        # BM25 scoring
-        tokenized_corpus = [doc.lower().split() for doc in corpus]
+        tokenized_corpus = [tokenize_cn(doc) for doc in corpus]
         bm25 = BM25Okapi(tokenized_corpus)
-        query_tokens = query.lower().split()
+        query_tokens = tokenize_cn(query)
         scores = bm25.get_scores(query_tokens)
 
-        # Sort by score descending, tie-break by filename (newer first)
+        # Sort: descending score (primary), descending filename (tie-break = newest first)
+        # reverse=True: (high_score → low_score), (z → a) for filenames
         scored = sorted(
             zip(scores, file_paths, corpus),
             key=lambda x: (x[0], x[1]),
             reverse=True,
         )
 
-        return [content for _, _, content in scored[:top_k]]
+        # Filter zero scores, take top_k
+        result = [content for score, _, content in scored if score > 0][:top_k]
+        return result
 
     def _load_content(self, path: str) -> str:
         """Load file content, skipping front-matter."""
         with open(path, encoding="utf-8") as f:
             content = f.read()
 
-        # Strip front-matter (---...---)
         if content.startswith("---"):
             parts = content.split("---", 2)
             if len(parts) >= 3:
