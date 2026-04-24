@@ -1,0 +1,66 @@
+services:
+  llama-server:
+    image: llama-cpp-sycl-server:latest
+    container_name: llama-server
+    ports:
+      - "8080:8080"
+    volumes:
+      - /home/bo/.cache/huggingface:/root/.cache/huggingface
+    environment:
+      - DEVICE=SYCL
+      - ONEAPI_DEVICE_SELECTOR=level_zero:0
+    devices:
+      - /dev/dri:/dev/dri
+    entrypoint: /bin/bash
+    command: >
+      -c "source /opt/intel/oneapi/setvars.sh --force 2>&1 && exec /app/llama-server \
+      --host 0.0.0.0 \
+      --port 8080 \
+      -hf unsloth/gemma-4-E4B-it-GGUF:Q8_0 \
+      -ngl 999 \
+      -c 4096"
+    restart: unless-stopped
+
+  funasr-api:
+    build:
+      context: ./funasr_api
+      dockerfile: Dockerfile
+    container_name: funasr-api
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  python-hub:
+    build: .
+    container_name: python-hub
+    ports:
+      - "8765:8765"
+      - "8766:8766"
+      - "8767:8767"
+    volumes:
+      - ./memory:/app/memory
+      - ./prompts:/app/prompts
+      - ./models:/app/models
+      - /tmp/voice-assistant-debug:/tmp/voice-assistant-debug
+    environment:
+      - LLM_BASE_URL=http://llama-server:8080/v1
+      - LLM_MODEL=unsloth/gemma-4-E4B-it-GGUF:Q8_0
+      - ASR_BASE_URL=http://funasr-api:8001
+      - PYTHONPATH=/app
+      - DEBUG_OUTPUT_DIR=/tmp/voice-assistant-debug
+    depends_on:
+      funasr-api:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+        reservations:
+          memory: 512m
+    restart: unless-stopped

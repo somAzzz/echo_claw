@@ -1,0 +1,240 @@
+"""Browser WebSocket handler for voice pipeline."""
+
+import asyncio
+import base64
+import json
+import logging
+import re
+
+import emoji
+import websockets
+from pydantic import BaseModel, field_validator
+from websockets.server import WebSocketServerProtocol
+
+from src.config import Config
+from src.pipeline.asr import ASRClient
+from src.pipeline.llm import LLMClient
+from src.pipeline.tts import TTSClient
+from src.protocol.ws_protocol import (
+    build_error,
+    build_llm_chunk,
+    build_state_directive,
+    build_tts_complete,
+    build_text,
+)
+from src.state_machine import StateMachine
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Asterisk pattern for markdown bold/italic
+ASTERISK_PATTERN = re.compile(r"\*+([^*]+)\*+")
+
+
+class TTSOutputText(BaseModel):
+    """Model for validated TTS output text."""
+    text: str
+
+    @field_validator('text')
+    @classmethod
+    def clean_text(cls, v: str) -> str:
+        # Remove markdown asterisks (bold/italic markers like **text** -> text)
+        v = ASTERISK_PATTERN.sub(r"\1", v)
+        # Remove emojis using the emoji library
+        v = emoji.replace_emoji(v, replace="")
+        # Normalize whitespace
+        v = " ".join(v.split())
+        return v.strip()
+
+
+def filter_tts_text(text: str) -> str:
+    """Filter text for TTS using Pydantic validation."""
+    validated = TTSOutputText(text=text)
+    return validated.text
+
+
+async def handle_browser(websocket: WebSocketServerProtocol) -> None:
+    """Handle browser WebSocket connection.
+
+    Args:
+        websocket: WebSocket connection from browser
+    """
+    cfg = Config.get_config()
+
+    sm = StateMachine()
+    asr = ASRClient(base_url=cfg.asr.base_url)
+    llm = LLMClient(
+        base_url=cfg.llm.base_url,
+        model=cfg.llm.model,
+        api_key=getattr(cfg.llm, "api_key", None),
+        max_tokens=cfg.llm.max_tokens,
+    )
+    tts = TTSClient(
+        voice=cfg.tts.voice,
+        rate=cfg.tts.rate,
+        pitch=cfg.tts.pitch,
+        volume=cfg.tts.volume,
+    )
+
+    session_id = ""
+    turn_id = 0
+    audio_chunks = []
+
+    try:
+        async for message in websocket:
+            if isinstance(message, str):
+                data = json.loads(message)
+                msg_type = data.get("type")
+
+                if msg_type == "audio_start":
+                    session_id = data.get("session_id", "browser")
+                    turn_id = data.get("turn_id", 1)
+                    sm.handle_message({"type": "audio_start", "session_id": session_id, "turn_id": turn_id})
+                    audio_chunks = []
+                    await websocket.send(build_state_directive(session_id, turn_id, "listening"))
+
+                elif msg_type == "audio_chunk":
+                    # Decode base64 audio
+                    b64_data = data.get("data", "")
+                    if b64_data:
+                        audio_bytes = base64.b64decode(b64_data)
+                        audio_chunks.append(audio_bytes)
+
+                elif msg_type == "audio_end":
+                    sm.handle_message({"type": "audio_end"})
+                    await run_browser_pipeline(websocket, sm, asr, llm, tts, session_id, turn_id, audio_chunks)
+
+                elif msg_type == "text_input":
+                    # Direct text input (bypasses ASR)
+                    user_text = data.get("text", "").strip()
+                    prompt = data.get("prompt", "")
+                    if user_text:
+                        logger.info(f"text_input received: user_text='{user_text}', prompt='{prompt[:50] if prompt else 'empty'}...'")
+                    await run_text_pipeline(websocket, llm, tts, session_id, turn_id, user_text, prompt)
+
+                elif msg_type == "cancel":
+                    sm.handle_cancel()
+                    await websocket.send(build_state_directive(session_id, turn_id, "idle"))
+
+            else:
+                logger.warning("Received binary data on browser WebSocket - ignored")
+
+    except websockets.exceptions.ConnectionClosed:
+        logger.info("Browser disconnected")
+
+
+async def run_browser_pipeline(
+    websocket,
+    sm: StateMachine,
+    asr: ASRClient,
+    llm: LLMClient,
+    tts: TTSClient,
+    session_id: str,
+    turn_id: int,
+    audio_chunks: list,
+) -> None:
+    """Run ASR → LLM → TTS pipeline for browser."""
+    if not audio_chunks:
+        await websocket.send(build_state_directive(session_id, turn_id, "idle"))
+        return
+
+    audio_bytes = b"".join(audio_chunks)
+
+    # ASR
+    try:
+        asr_result = await asr.recognize(audio_bytes)
+        user_text = asr_result.text
+    except Exception as e:
+        logger.error(f"ASR error: {e}")
+        await websocket.send(build_error(str(e), session_id, turn_id))
+        return
+
+    if not user_text:
+        await websocket.send(build_state_directive(session_id, turn_id, "idle"))
+        return
+
+    await websocket.send(build_text(user_text, session_id, turn_id))
+
+    # Run LLM → TTS
+    await run_llm_to_tts(websocket, llm, tts, session_id, turn_id, user_text)
+
+
+async def run_text_pipeline(
+    websocket,
+    llm: LLMClient,
+    tts: TTSClient,
+    session_id: str,
+    turn_id: int,
+    user_text: str,
+    prompt: str = "",
+) -> None:
+    """Run LLM → TTS pipeline for direct text input (bypasses ASR)."""
+    logger.info(f"run_text_pipeline called: user_text='{user_text}', session_id={session_id}, turn_id={turn_id}")
+    await websocket.send(build_text(user_text, session_id, turn_id))
+    await run_llm_to_tts(websocket, llm, tts, session_id, turn_id, user_text, prompt)
+
+
+async def run_llm_to_tts(
+    websocket,
+    llm: LLMClient,
+    tts: TTSClient,
+    session_id: str,
+    turn_id: int,
+    user_text: str,
+    prompt: str = "",
+) -> None:
+    """Run LLM streaming followed by TTS synthesis."""
+    logger.info(f"run_llm_to_tts called: user_text='{user_text}', prompt='{prompt[:50] if prompt else 'empty'}...'")
+    # LLM streaming with llm_chunk messages
+    messages = [{"role": "user", "content": user_text}]
+
+    text_buffer = ""
+    full_response = ""
+
+    try:
+        async for token in llm.stream_chat(messages, system=prompt if prompt else None):
+            text_buffer += token
+            full_response += token
+
+            # Send llm_chunk periodically
+            if len(text_buffer) >= 20:
+                await websocket.send(build_llm_chunk(text_buffer, session_id, turn_id))
+                text_buffer = ""
+
+        if text_buffer:
+            await websocket.send(build_llm_chunk(text_buffer, session_id, turn_id))
+
+    except Exception as e:
+        logger.error(f"LLM error: {type(e).__name__}: {e}", exc_info=True)
+        await websocket.send(build_error(str(e), session_id, turn_id))
+        return
+
+    # TTS synthesis
+    logger.info(f"LLM complete, full_response length: {len(full_response)}, content: {full_response[:100] if full_response else 'EMPTY'}")
+    filtered_text = filter_tts_text(full_response)
+    logger.info(f"After filter_tts_text, filtered length: {len(filtered_text)}, content: {filtered_text[:100] if filtered_text else 'EMPTY'}")
+    if not filtered_text.strip():
+        logger.warning("Filtered text is empty, sending idle state")
+        await websocket.send(build_state_directive(session_id, turn_id, "idle"))
+        return
+
+    logger.info(f"TTS synthesis starting for text length: {len(filtered_text)}")
+    try:
+        # Collect all audio chunks first
+        audio_parts = []
+        async for audio_chunk in tts.synthesize(filtered_text):
+            audio_parts.append(audio_chunk)
+
+        logger.info(f"TTS collected {len(audio_parts)} audio parts, total size: {sum(len(p) for p in audio_parts)} bytes")
+        if audio_parts:
+            full_audio = b"".join(audio_parts)
+            b64_audio = base64.b64encode(full_audio).decode()
+            logger.info(f"TTS sending tts_complete with b64 length: {len(b64_audio)}")
+            await websocket.send(build_tts_complete(b64_audio, session_id, turn_id))
+        else:
+            logger.info("TTS audio_parts was empty, sending idle state")
+            await websocket.send(build_state_directive(session_id, turn_id, "idle"))
+
+    except Exception as e:
+        logger.error(f"TTS error: {e}")
+        await websocket.send(build_error(str(e), session_id, turn_id))

@@ -1,0 +1,64 @@
+# config.yaml — Voice Assistant Python Hub Configuration
+
+server:
+  host: "0.0.0.0"
+  port: 8765
+  http_port: 8766
+  keepalive_timeout: 30  # 秒，无数据超时后关闭连接
+
+prompt_dir: "./prompts"
+
+llm:
+  base_url: "http://llama-server:8080/v1"
+  model: "unsloth/gemma-4-E4B-it-GGUF:Q8_0"
+  max_tokens: 131072
+  temperature: 0.7
+
+# 本地开发使用本地模型路径，Docker部署时使用 /app/models/*
+asr:
+  model_dir: "./models/asr"
+  tokens: "./models/asr/tokens.txt"
+  encoder: "./models/asr/encoder.onnx"
+  decoder: "./models/asr/decoder.onnx"
+  joiner: "./models/asr/joiner.onnx"
+
+tts:
+  voice: "zh-CN-YunxiaNeural"
+  rate: "-20%"
+  pitch: "+13Hz"
+  volume: "+0%"
+
+kws:
+  model_dir: "./models/kws"
+  tokens: "./models/kws/tokens.txt"
+  encoder: "./models/kws/encoder.onnx"
+  decoder: "./models/kws/decoder.onnx"
+  joiner: "./models/kws/joiner.onnx"
+  keywords_file: "./models/kws/keywords.txt"
+  threshold: 0.5  # 唤醒置信度阈值
+
+vad:
+  model_dir: "./models/vad"
+  silence_threshold: 0.8  # 秒，持续静音时长触发截断
+
+memory:
+  # Rolling summary memory configuration (dual-track architecture)
+  # Track 1: Main chat uses build_prompt() with global_summary + recent_turns
+  # Track 2: Background async summarization via asyncio.create_task
+
+  # Window parameters (sliding memory)
+  window_size: 10           # N - max turns kept in short-term memory (recent_turns)
+  step_size: 5              # M - turns to compress per summary (N/2, half-life strategy)
+
+  # Trigger parameters (dual-gate)
+  token_threshold: 8000    # chars, trigger summary if estimated tokens exceed this
+  max_summary_length: 300  # max chars for global_summary (conservative ~300 tokens)
+
+  # Session persistence (for debugging/sessions)
+  session_dir: "./memory/sessions"
+  summary_dir: "./memory/summaries"
+
+backpressure:
+  asr_queue_max: 100      # ASR 输入队列最大长度
+  tts_queue_max: 50       # TTS 音频队列最大长度
+  llm_queue_max: 20       # LLM token 队列最大长度
