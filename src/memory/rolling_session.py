@@ -10,6 +10,8 @@ import logging
 if TYPE_CHECKING:
     from ..pipeline.llm import LLMClient
 
+from .storage import get_storage
+
 logger = logging.getLogger(__name__)
 
 
@@ -154,6 +156,10 @@ async def summarize_async(
             session.recent_turns = session.recent_turns[M:]  # Remove only first M
             logger.info(f"Summary updated for session {session.session_id}, new length: {len(new_summary)}")
 
+            # Persist to disk
+            storage = get_storage()
+            await storage.save(session.session_id, new_summary)
+
     except Exception as e:
         logger.error(f"Summary failed for session {session.session_id}: {e}")
     finally:
@@ -182,13 +188,45 @@ _sessions: Dict[str, VoiceSession] = {}
 
 
 def get_session(session_id: str, **kwargs) -> VoiceSession:
-    """Get or create a session by ID."""
+    """Get or create a session by ID (sync version for main.py).
+
+    Note: Does not load from disk. Use get_session_async for disk persistence.
+    """
     if session_id not in _sessions:
         _sessions[session_id] = VoiceSession(session_id=session_id, **kwargs)
     return _sessions[session_id]
 
 
+async def get_session_async(session_id: str, **kwargs) -> VoiceSession:
+    """Get or create a session by ID with disk persistence.
+
+    Loads persisted global_summary from disk if available.
+    """
+    if session_id not in _sessions:
+        # Try to load persisted summary from disk
+        storage = get_storage()
+        persisted_summary = await storage.load(session_id)
+
+        session_kwargs = dict(kwargs)
+        if persisted_summary:
+            session_kwargs.setdefault("global_summary", persisted_summary)
+
+        _sessions[session_id] = VoiceSession(session_id=session_id, **session_kwargs)
+        if persisted_summary:
+            logger.info(f"Loaded persisted summary for session {session_id}")
+
+    return _sessions[session_id]
+
+
 def cleanup_session(session_id: str) -> None:
-    """Remove session from registry."""
+    """Remove session from registry (sync version)."""
     if session_id in _sessions:
         del _sessions[session_id]
+
+
+async def cleanup_session_async(session_id: str) -> None:
+    """Remove session from registry and delete from disk."""
+    if session_id in _sessions:
+        del _sessions[session_id]
+    storage = get_storage()
+    await storage.delete(session_id)
