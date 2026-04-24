@@ -10,15 +10,14 @@ wheels/
 # Virtual environments
 .venv
 .worktrees/
+.superpowers/
 
 # Frontend dependencies
 frontend/node_modules/
 frontend/dist/
 frontend/*.pem
 
-# docs
-.superpowers/
-docs/
+
 
 # Models (except vad)
 models/asr/
