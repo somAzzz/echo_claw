@@ -20,6 +20,7 @@ Protocol messages (Hub->ESP32):
 - tts_end: TTS audio end
 """
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum, auto
 from typing import Optional, Any
 
@@ -36,8 +37,10 @@ class PendingTurn:
     """Represents an in-progress voice turn."""
     session_id: str
     turn_id: int
-    audio_chunks: list[bytes] = field(default_factory=list)
     text: Optional[str] = None
+    audio_chunks: list[bytes] = field(default_factory=list)
+    started_at: datetime = field(default_factory=datetime.now)
+    user_text: Optional[str] = None  # alias for text (user-provided input)
 
 
 class StateMachine:

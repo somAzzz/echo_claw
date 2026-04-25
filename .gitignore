@@ -25,5 +25,5 @@ models/kws/
 models/examples/
 models/sherpa-*/
 models/tts/
-
+node_modules/
 

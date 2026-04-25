@@ -126,8 +126,11 @@ async def test_stream_chat_with_system_message():
         ):
             pass
 
-    assert "system" in captured_json["json"]
-    assert captured_json["json"]["system"] == "You are a helpful assistant"
+    # system message should be prepended as messages[0] per OpenAI API spec
+    captured = captured_json["json"]
+    assert "messages" in captured
+    assert captured["messages"][0]["role"] == "system"
+    assert captured["messages"][0]["content"] == "You are a helpful assistant"
 
 
 @pytest.mark.asyncio

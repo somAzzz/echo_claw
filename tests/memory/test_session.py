@@ -4,7 +4,8 @@ import uuid
 
 import pytest
 
-from src.memory.session import Session, Turn, Summary, PendingTurn
+from src.memory.session import Session, Turn, Summary
+from src.state_machine import PendingTurn
 
 
 class TestPendingTurn:

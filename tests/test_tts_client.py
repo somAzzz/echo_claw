@@ -101,8 +101,8 @@ class TestTTSClientSynthesize:
 
         with patch("edge_tts.Communicate", return_value=mock_communicate):
             mock_process = AsyncMock()
-            # Simulate multiple chunks
-            audio_data = b"\x00" * 8192  # More than 4096 to test chunking
+            # Simulate multiple chunks (16384 bytes → 2 chunks of 8192 each)
+            audio_data = b"\x00" * 16384
             mock_process.communicate = AsyncMock(return_value=(audio_data, b""))
             mock_process.returncode = 0
 
@@ -111,7 +111,7 @@ class TestTTSClientSynthesize:
                 async for chunk in client.synthesize("hello"):
                     chunks.append(chunk)
 
-                # Should have 2 chunks (4096 bytes each for 8192 total)
+                # Should have 2 chunks (8192 bytes each for 16384 total)
                 assert len(chunks) == 2
 
     @pytest.mark.asyncio

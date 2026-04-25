@@ -22,7 +22,7 @@ from datetime import datetime
 from typing import Optional
 
 import websockets
-from websockets.server import WebSocketServerProtocol
+from websockets import ServerConnection
 
 from src.config import Config
 from src.http_api import app as http_app
@@ -53,7 +53,7 @@ MAX_BUFFER_CHARS = 200
 DEBUG_OUTPUT_DIR = os.environ.get("DEBUG_OUTPUT_DIR")
 
 
-async def send_json(websocket: WebSocketServerProtocol, data: dict | str) -> None:
+async def send_json(websocket: ServerConnection, data: dict | str) -> None:
     """Send a JSON message to the WebSocket client."""
     if isinstance(data, str):
         await websocket.send(data)
@@ -61,13 +61,13 @@ async def send_json(websocket: WebSocketServerProtocol, data: dict | str) -> Non
         await websocket.send(json.dumps(data))
 
 
-async def send_binary(websocket: WebSocketServerProtocol, data: bytes) -> None:
+async def send_binary(websocket: ServerConnection, data: bytes) -> None:
     """Send binary data to the WebSocket client."""
     await websocket.send(data)
 
 
 async def run_pipeline(
-    websocket: WebSocketServerProtocol,
+    websocket: ServerConnection,
     pending_turn: PendingTurn,
     asr: ASRClient,
     llm: LLMClient,
@@ -211,7 +211,7 @@ async def run_pipeline(
         await send_json(websocket, build_error(str(e), session_id, turn_id))
 
 
-async def handle_esp32(websocket: WebSocketServerProtocol) -> None:
+async def handle_esp32(websocket: ServerConnection) -> None:
     """Handle a single ESP32 client connection.
 
     Args:

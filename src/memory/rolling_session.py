@@ -70,7 +70,7 @@ class VoiceSession:
         if global_context:
             messages.append({
                 "role": "system",
-                "content": f"[全局记忆]\n{global_context}\n\n【重要】当全局记忆中的信息与当前对话冲突时，以时间更近的记录为准。"
+                "content": "[记忆]\n以下是你之前记住的用户信息，请直接基于这些信息回答用户的问题：\n" + global_context
             })
         elif self.global_summary and self.global_summary != "暂无早期记忆记录。":
             messages.append({
