@@ -4,7 +4,7 @@ import os
 import re
 from typing import List
 
-from rank_bm25 import BM25Okapi
+from rank_bm25 import BM25Plus
 
 
 # Trigger patterns for global memory recall
@@ -26,15 +26,17 @@ TRIGGER_PATTERNS = [
 
 
 def tokenize_cn(text: str) -> List[str]:
-    """Character bigram tokenization for Chinese + English word split.
+    """Chinese word segmentation using jieba + English word split.
 
-    Chinese: character bigrams for sub-character matching.
+    Chinese: jieba cutting for proper word boundaries.
     English/Python: word-level matching on whitespace.
     """
-    chars = list(text.lower())
-    bigrams = [''.join(chars[i:i+2]) for i in range(len(chars)-1)]
-    words = text.lower().split()
-    return bigrams + words
+    import jieba
+    words = []
+    for word in jieba.cut(text.lower()):
+        if word.strip():
+            words.append(word)
+    return words
 
 
 class GlobalRetriever:
@@ -89,7 +91,7 @@ class GlobalRetriever:
             return []
 
         tokenized_corpus = [tokenize_cn(doc) for doc in corpus]
-        bm25 = BM25Okapi(tokenized_corpus)
+        bm25 = BM25Plus(tokenized_corpus)
         query_tokens = tokenize_cn(query)
         scores = bm25.get_scores(query_tokens)
 
