@@ -208,17 +208,50 @@ dependencies = [
 
 ## Implementation Tasks
 
-1. Add FastAPI, uvicorn, python-multipart dependencies to pyproject.toml
-2. Create `prompt_store.py` for file-based prompt management
-3. Create `http_api.py` with FastAPI endpoints
-4. Add `build_llm_chunk()` and `build_tts_audio()` to ws_protocol.py
-5. Create `browser_ws_handler.py` for browser WebSocket protocol
-6. Add cancel handler to state_machine.py
-7. Update config.py: add `prompt_dir`, `http_port` settings
-8. Update config.py: add TTS config save/load via API
-9. Add TTS text filtering: remove asterisks from text before synthesis
-10. Create React app with Vite
-11. Implement PromptPanel component
-12. Implement ChatLog component
-13. Implement MicrophonePanel with WebAudio API
-14. Implement SettingsPanel
+1. Add FastAPI, uvicorn, python-multipart dependencies to pyproject.toml ✅
+2. Create `prompt_store.py` for file-based prompt management ✅
+3. Create `http_api.py` with FastAPI endpoints ✅
+4. Add `build_llm_chunk()` and `build_tts_audio()` to ws_protocol.py ✅
+5. Create `browser_ws_handler.py` for browser WebSocket protocol ✅
+6. Add cancel handler to state_machine.py ✅
+7. Update config.py: add `prompt_dir`, `http_port` settings ✅
+8. Update config.py: add TTS config save/load via API ✅
+9. Add TTS text filtering: remove asterisks from text before synthesis ✅
+10. Create React app with Vite ⚠️ (frontend repo exists, not integrated)
+11. Implement PromptPanel component ⚠️
+12. Implement ChatLog component ⚠️
+13. Implement MicrophonePanel with WebAudio API ⚠️
+14. Implement SettingsPanel ⚠️
+
+---
+
+## Implementation Status (2026-04-25)
+
+### Completed ✅
+
+- [x] FastAPI HTTP API on port 8766
+- [x] Prompt store with file-based management
+- [x] Browser WebSocket handler (base64 audio)
+- [x] `llm_chunk` streaming messages
+- [x] `tts_complete` for complete audio response
+- [x] Cancel message handler
+- [x] TTS text filtering (emoji, markdown, whitespace)
+- [x] CORS enabled for frontend development
+
+### Pending ⚠️
+
+- [ ] React frontend integration with real backend
+- [ ] PromptPanel UI component
+- [ ] ChatLog UI component
+- [ ] MicrophonePanel with push-to-talk
+- [ ] SettingsPanel for TTS config
+
+### WebSocket Protocol (Current)
+
+| Client → Server | Server → Client |
+|-----------------|------------------|
+| `audio_start` | `state` |
+| `audio_chunk` (base64) | `text` |
+| `audio_end` | `llm_chunk` |
+| `text_input` | `tts_complete` (base64 WAV) |
+| `cancel` | `error` |

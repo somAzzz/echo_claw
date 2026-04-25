@@ -306,8 +306,37 @@ def cleanup_session(session_id: str):
 
 ## Files to Modify/Create
 
-1. `src/memory/rolling_session.py` - New VoiceSession class with async summarization
-2. `src/memory/prompts.py` - Summary fusion prompt template
-3. `src/browser_ws_handler.py` - Integrate session management
-4. `src/main.py` - Update ESP32 handler to use new session pattern
-5. `config.yaml` - Add memory configuration parameters
+1. `src/memory/rolling_session.py` - VoiceSession class with async summarization ✅ (implemented)
+2. `src/memory/prompts.py` - Summary fusion prompt template ✅ (implemented)
+3. `src/memory/storage.py` - Disk persistence for summaries ✅ (implemented)
+4. `src/memory/global_memory.py` - BM25 cross-session memory ✅ (implemented)
+5. `src/memory/retriever.py` - BM25Plus + jieba tokenization ✅ (implemented)
+6. `src/browser_ws_handler.py` - Integrate session management ✅ (implemented)
+7. `src/main.py` - Update ESP32 handler to use new session pattern ✅ (implemented)
+
+---
+
+## Implementation Status (2026-04-25)
+
+### Completed Features
+
+- [x] VoiceSession with dual-track rolling compression
+- [x] Async summarization via asyncio.create_task
+- [x] Disk persistence via SessionStorage (JSON)
+- [x] Cross-session global memory via BM25Plus + jieba
+- [x] force_summarize for session-end data preservation
+- [x] Global memory trigger patterns (26 Chinese patterns)
+- [x] Integration into both browser_ws_handler and main.py
+
+### Configuration
+
+```yaml
+memory:
+  window_size: 10        # N - max turns in short-term memory
+  step_size: 5           # M - turns to compress per summary (N/2)
+  token_threshold: 8000   # chars, trigger summary if exceeded
+  max_summary_length: 300 # max chars for global_summary
+  global_dir: "./memory/global"  # cross-session memory directory
+  top_k: 3               # BM25 retrieval top-k
+  max_chars: 2000         # max chars for global context retrieval
+```

@@ -238,3 +238,20 @@ No changes needed. `sendAudioEnd` sends `{ type: 'audio_end' }` for browser→se
    - Move tts_end logic (setStatus, message completion) to appropriate handler
    - Update playFullAudio to use single audio data
    - Simplify button onClick to just playFullAudio
+
+---
+
+## Implementation Status (2026-04-25)
+
+### Completed ✅
+
+- [x] `src/browser_ws_handler.py` - Collect audio chunks, send single `tts_complete` message
+- [x] `src/protocol/ws_protocol.py` - `build_tts_complete()` function
+- [x] `src/protocol/ws_protocol.py` - Removed `build_tts_audio()` (replaced by tts_complete)
+- [x] Backend waits for TTS complete before sending
+- [x] Base64 WAV audio sent in single message
+
+### Pending ⚠️
+
+- [ ] Frontend `App.jsx` - Full implementation pending frontend integration
+- [ ] Frontend `websocket.js` - Handler update pending
