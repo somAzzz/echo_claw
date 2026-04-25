@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from src.config import Config
+from src.memory.soul import load_soul_doc, save_soul_doc, clear_cache
 from src.prompt_store import PromptStore
 
 
@@ -126,6 +127,37 @@ def get_status() -> dict:
         "llm_url": config.llm.base_url,
         "llm_model": config.llm.model,
     }
+
+
+# SOUL.md API (local-first with OpenClaw fallback)
+@app.get("/api/soul")
+def get_soul() -> dict:
+    """Get SOUL.md content.
+
+    Returns:
+        SOUL.md content from local-first priority:
+        1. prompts/soul.md (python-hub managed)
+        2. ~/.openclaw/workspace/SOUL.md (OpenClaw global)
+        3. Default fallback
+    """
+    content = load_soul_doc()
+    return {"content": content}
+
+
+class SoulUpdate(BaseModel):
+    content: str
+
+
+@app.put("/api/soul")
+def update_soul(soul: SoulUpdate) -> dict:
+    """Update SOUL.md content.
+
+    Saves to local prompts/soul.md (python-hub managed).
+    Does NOT modify OpenClaw global SOUL.md.
+    """
+    save_soul_doc(soul.content)
+    clear_cache()  # Invalidate cached SOUL prompt
+    return {"status": "updated"}
 
 
 if __name__ == "__main__":
