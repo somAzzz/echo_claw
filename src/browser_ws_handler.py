@@ -221,11 +221,15 @@ async def run_llm_to_tts(
         global_context = await global_mem.retrieve(user_text)
         logger.info(f"Global context retrieved: {len(global_context)} chars")
 
-    # Build prompt with system + global context
+    # Build prompt: identity + SOUL rules + global context
+    from src.memory.soul import get_soul_prompt
+    identity = prompt if prompt else ""
+    soul_rules = get_soul_prompt()
     built_messages = voice_session.build_prompt(
-        system_prompt=prompt if prompt else "",
+        base_identity=identity,
         current_input=user_text,
         global_context=global_context,
+        soul_rules=soul_rules,
     )
 
     # Add user turn to session

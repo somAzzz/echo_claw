@@ -45,3 +45,5 @@ __all__ = [
     "GLOBAL_DIR",
     "GlobalRetriever",
 ]
+
+from .soul import get_soul_prompt, get_cached_soul_prompt, clear_cache

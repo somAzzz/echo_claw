@@ -53,36 +53,52 @@ class VoiceSession:
             total_chars += len(turn.content)
         return total_chars // 2
 
-    def build_prompt(self, system_prompt: str, current_input: str, global_context: str = "") -> List[dict]:
+    def build_prompt(self, base_identity: str, current_input: str, global_context: str = "", soul_rules: str = "") -> List[dict]:
         """Build messages for LLM with memory context.
 
-        Prompt structure:
-        [System Prompt] + [global_context] + [global_summary] + [recent_turns] + [current_input]
+        Prompt structure (attention-layered, top = highest priority):
+        [0] system: base_identity + soul_rules (always present)
+        [1] global_context (BM25 retrieved, cross-session facts)
+        [2] global_summary (intra-session rolling summary)
+        [3] recent turns (short-term window)
+        [4] current input (user turn)
 
         Args:
-            system_prompt: Base system prompt
+            base_identity: Static identity prompt (from prompts/default.txt)
             current_input: Current user input
             global_context: Optional cross-session global memory (BM25 retrieved)
+            soul_rules: SOUL behavioral rules from SOUL.md
         """
         messages = []
 
-        # Add memory context if exists
+        # Layer [0]: base identity + SOUL behavioral rules
+        system_content = base_identity
+        if soul_rules:
+            system_content += soul_rules
+        messages.append({
+            "role": "system",
+            "content": system_content
+        })
+
+        # Layer [1]: global context (cross-session facts, only when trigger fired)
         if global_context:
             messages.append({
                 "role": "system",
-                "content": "[记忆]\n以下是你之前记住的用户信息，请直接基于这些信息回答用户的问题：\n" + global_context
+                "content": "[全局记忆]\n以下是你之前记住的用户信息，请直接基于这些信息回答用户的问题：\n" + global_context
             })
+
+        # Layer [2]: session-level summary (intra-session rolling compression)
         elif self.global_summary and self.global_summary != "暂无早期记忆记录。":
             messages.append({
                 "role": "system",
                 "content": f"[记忆上下文]\n{self.global_summary}"
             })
 
-        # Add recent turns (up to window_size)
+        # Layer [3]: recent turns (short-term window)
         for turn in self.recent_turns[-self.window_size:]:
             messages.append({"role": turn.role, "content": turn.content})
 
-        # Add current user input
+        # Layer [4]: current user input
         messages.append({"role": "user", "content": current_input})
         return messages
 

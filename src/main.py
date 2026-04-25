@@ -27,7 +27,7 @@ from websockets import ServerConnection
 from src.config import Config
 from src.http_api import app as http_app
 from src.browser_ws_handler import handle_browser
-from src.memory import get_session, cleanup_session, summarize_async, get_global_memory
+from src.memory import get_session, cleanup_session, summarize_async, get_global_memory, get_cached_soul_prompt
 from src.pipeline.asr import ASRClient
 from src.pipeline.llm import LLMClient
 from src.pipeline.tts import TTSClient
@@ -127,7 +127,16 @@ async def run_pipeline(
         global_context = await global_memory.retrieve(user_text)
         logger.info(f"Global memory retrieved: {len(global_context)} chars")
 
-    messages = voice_session.build_prompt("", user_text, global_context)
+    # Load identity from prompts/default.txt + SOUL rules from SOUL.md
+    default_path = os.path.join(os.path.dirname(__file__), "prompts/default.txt")
+    identity = ""
+    if os.path.exists(default_path):
+        identity = open(default_path).read().strip()
+    
+    from src.memory.soul import get_soul_prompt
+    soul_rules = get_soul_prompt()  # returns just the behavioral rules
+    
+    messages = voice_session.build_prompt(identity, user_text, global_context, soul_rules)
 
     text_buffer = ""
     full_llm_response = ""  # Accumulate the complete LLM response
