@@ -310,6 +310,10 @@ async def handle_esp32(websocket: ServerConnection) -> None:
             elif msg_type == "session_end":
                 sm.handle_message(parsed)
                 if voice_session:
+                    # Force summarize remaining turns before cleanup
+                    if voice_session.recent_turns:
+                        await voice_session.force_summarize(llm)
+
                     # Write session summary to global memory before cleanup
                     if voice_session.global_summary and voice_session.global_summary != "暂无早期记忆记录。":
                         global_memory = get_global_memory()

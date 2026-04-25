@@ -115,16 +115,48 @@ class VoiceSession:
             return True
         return False
 
+    async def force_summarize(self, llm_client) -> None:
+        """Force compress all remaining turns at session end.
+
+        Called when session disconnects to ensure no dialogue is lost.
+        Uses merge_all=True to compress ALL remaining turns.
+        """
+        if not self.recent_turns:
+            return
+
+        # Check if we need to compress or just use as-is
+        if self.global_summary == "暂无早期记忆记录。":
+            # No prior summary - just merge all turns directly
+            await summarize_async(
+                session=self,
+                llm_client=llm_client,
+                merge_all=True,
+            )
+        else:
+            # Has prior summary - fuse with existing
+            await summarize_async(
+                session=self,
+                llm_client=llm_client,
+                merge_all=True,
+            )
+
 
 async def summarize_async(
     session: VoiceSession,
     llm_client: "LLMClient",
-    max_summary_length: int = 300
+    max_summary_length: int = 300,
+    merge_all: bool = False,
 ) -> None:
     """Background summarization task.
 
     Extracts earliest M turns, calls LLM to fuse with global_summary,
     then atomically replaces global_summary and removes the M turns.
+
+    Args:
+        session: VoiceSession to summarize
+        llm_client: LLM client for summarization
+        max_summary_length: Max characters for summary
+        merge_all: If True, compress ALL remaining turns instead of just M
     """
     if session.is_summarizing:
         return
@@ -132,6 +164,8 @@ async def summarize_async(
     session.is_summarizing = True
     try:
         M = session.step_size
+        if merge_all:
+            M = len(session.recent_turns)  # Compress all remaining turns
 
         # Extract earliest M turns (snapshot, not reference)
         turns_to_merge = session.recent_turns[:M]
@@ -163,7 +197,7 @@ async def summarize_async(
 
             # Atomic replacement
             session.global_summary = new_summary
-            session.recent_turns = session.recent_turns[M:]  # Remove only first M
+            session.recent_turns = session.recent_turns[M:]  # Remove merged turns
             logger.info(f"Summary updated for session {session.session_id}, new length: {len(new_summary)}")
 
             # Persist to disk

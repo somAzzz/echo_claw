@@ -80,12 +80,18 @@ async def handle_browser(websocket: ServerConnection) -> None:
 
     async def _finalize_session():
         """Write session to global memory and cleanup."""
-        nonlocal voice_session
-        if voice_session and voice_session.global_summary and voice_session.global_summary != "暂无早期记忆记录。":
-            global_mem = _get_global_memory()
-            await global_mem.write(voice_session.session_id, voice_session.global_summary)
-            logger.info(f"Session {voice_session.session_id} summary written to global memory")
+        nonlocal voice_session, llm
         if voice_session:
+            # Force summarize remaining turns before cleanup
+            if voice_session.recent_turns:
+                await voice_session.force_summarize(llm)
+
+            # Write to global memory if summary exists
+            if voice_session.global_summary and voice_session.global_summary != "暂无早期记忆记录。":
+                global_mem = _get_global_memory()
+                await global_mem.write(voice_session.session_id, voice_session.global_summary)
+                logger.info(f"Session {voice_session.session_id} summary written to global memory")
+
             cleanup_session(voice_session.session_id)
             voice_session = None
 
