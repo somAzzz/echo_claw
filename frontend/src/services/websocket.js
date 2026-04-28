@@ -1,108 +1,133 @@
 // Always use plain WebSocket since backend doesn't have TLS
 const WS_URL = `ws://${window.location.hostname}:8767`;
+const API_URL = `http://${window.location.hostname}:8766`;
 
-let ws = null;
-let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 5;
-const RECONNECT_DELAY = 1000;
-
-export function connect(onMessage, onStatusChange) {
-  return new Promise((resolve, reject) => {
-    try {
-      ws = new WebSocket(WS_URL);
-
-      ws.onopen = () => {
-        console.log('WebSocket connected');
-        reconnectAttempts = 0;
-        resolve();
-      };
-
-      ws.onclose = (event) => {
-        console.log('WebSocket closed', event.code, event.reason);
-        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-          const delay = RECONNECT_DELAY * Math.pow(2, reconnectAttempts);
-          console.log(`Reconnecting in ${delay}ms...`);
-          setTimeout(() => {
-            reconnectAttempts++;
-            connect(onMessage, onStatusChange);
-          }, delay);
-        }
-      };
-
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        reject(error);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'state') {
-            onStatusChange(data.state);
-          } else {
-            onMessage(data);
-          }
-        } catch (e) {
-          console.error('Failed to parse message:', e);
-        }
-      };
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
-
-export function sendMessage(message) {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(message));
-    return true;
+export class BrowserWebSocket {
+  constructor() {
+    this._ws = null;
+    this._reconnectAttempts = 0;
+    this._maxReconnectAttempts = 5;
+    this._reconnectDelay = 1000;
+    this._onMessage = null;
+    this._onStatusChange = null;
+    this._reconnectTimer = null;
   }
-  console.error('WebSocket not connected, readyState:', ws ? ws.readyState : 'ws is null');
-  return false;
-}
 
-export function sendAudioChunk(audioData) {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
+  connect(onMessage, onStatusChange) {
+    this._onMessage = onMessage;
+    this._onStatusChange = onStatusChange;
+    return this._connectInternal();
+  }
+
+  _connectInternal() {
+    return new Promise((resolve, reject) => {
+      try {
+        this._ws = new WebSocket(WS_URL);
+
+        this._ws.onopen = () => {
+          console.log('WebSocket connected');
+          this._reconnectAttempts = 0;
+          resolve();
+        };
+
+        this._ws.onclose = (event) => {
+          console.log('WebSocket closed', event.code, event.reason);
+          this._tryReconnect();
+        };
+
+        this._ws.onerror = (error) => {
+          console.error('WebSocket error:', error);
+          reject(error);
+        };
+
+        this._ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'state') {
+              this._onStatusChange?.(data.state);
+            } else {
+              this._onMessage?.(data);
+            }
+          } catch (e) {
+            console.error('Failed to parse message:', e);
+          }
+        };
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  _tryReconnect() {
+    if (this._reconnectAttempts < this._maxReconnectAttempts) {
+      const delay = this._reconnectDelay * Math.pow(2, this._reconnectAttempts);
+      console.log(`Reconnecting in ${delay}ms...`);
+      this._reconnectTimer = setTimeout(() => {
+        this._reconnectAttempts++;
+        this._connectInternal().catch(() => {});
+      }, delay);
+    }
+  }
+
+  _send(message) {
+    if (this._ws && this._ws.readyState === WebSocket.OPEN) {
+      this._ws.send(JSON.stringify(message));
+      return true;
+    }
+    console.error('WebSocket not connected, readyState:', this._ws ? this._ws.readyState : 'ws is null');
+    return false;
+  }
+
+  sendAudioChunk(audioData) {
+    return this._send({
       type: 'audio_chunk',
       data: audioData,
-    }));
+    });
+  }
+
+  sendAudioStart(sessionId) {
+    return this._send({
+      type: 'audio_start',
+      session_id: sessionId || 'browser-session',
+      turn_id: Date.now(),
+    });
+  }
+
+  sendAudioEnd() {
+    return this._send({ type: 'audio_end' });
+  }
+
+  sendCancel() {
+    return this._send({ type: 'cancel' });
+  }
+
+  sendSessionEnd(sessionId) {
+    const data = new URLSearchParams({ session_id: sessionId });
+    navigator.sendBeacon(`${API_URL}/api/session/end?${data.toString()}`);
     return true;
   }
-  return false;
-}
 
-export function sendAudioStart(sessionId) {
-  return sendMessage({
-    type: 'audio_start',
-    session_id: sessionId || 'browser-session',
-    turn_id: Date.now(),
-  });
-}
-
-export function sendAudioEnd() {
-  return sendMessage({ type: 'audio_end' });
-}
-
-export function sendCancel() {
-  return sendMessage({ type: 'cancel' });
-}
-
-export function sendTextInput(text, promptContent = '') {
-  return sendMessage({
-    type: 'text_input',
-    text: text,
-    prompt: promptContent,
-  });
-}
-
-export function disconnect() {
-  if (ws) {
-    ws.close();
-    ws = null;
+  sendTextInput(text, promptContent = '', sessionId = 'browser-session') {
+    return this._send({
+      type: 'text_input',
+      text: text,
+      prompt: promptContent,
+      session_id: sessionId,
+    });
   }
-}
 
-export function getReadyState() {
-  return ws ? ws.readyState : WebSocket.CLOSED;
+  disconnect() {
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
+    if (this._ws) {
+      this._ws.close();
+      this._ws = null;
+    }
+  }
+
+  get readyState() {
+    return this._ws ? this._ws.readyState : WebSocket.CLOSED;
+  }
 }

@@ -34,6 +34,20 @@ class TTSClient:
         self.pitch = pitch
         self.volume = volume
 
+    async def _synthesize_webm(self, text: str) -> str:
+        """Synthesize text to a temporary webm file via edge-tts.
+
+        Returns path to the temporary webm file (caller must clean up).
+        """
+        with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as f:
+            temp_path = f.name
+        communicate = edge_tts.Communicate(text, self.voice)
+        communicate._rate = self.rate
+        communicate._pitch = self.pitch
+        communicate._volume = self.volume
+        await communicate.save(temp_path)
+        return temp_path
+
     async def synthesize(self, text: str) -> AsyncGenerator[bytes, None]:
         """Convert text to WAV audio using edge-tts + ffmpeg.
 
@@ -45,18 +59,9 @@ class TTSClient:
         """
         temp_path = None
         try:
-            # Create temp file for webm output
-            with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as f:
-                temp_path = f.name
+            temp_path = await self._synthesize_webm(text)
 
-            # Generate audio using edge-tts with rate/pitch/volume
-            communicate = edge_tts.Communicate(text, self.voice)
-            communicate._rate = self.rate
-            communicate._pitch = self.pitch
-            communicate._volume = self.volume
-            await communicate.save(temp_path)
-
-            # Convert to WAV using ffmpeg (output as WAV file)
+            # Convert to WAV using ffmpeg (output to stdout)
             process = await asyncio.create_subprocess_exec(
                 "ffmpeg", "-y",
                 "-i", temp_path,
@@ -91,16 +96,9 @@ class TTSClient:
         """
         temp_path = None
         try:
-            with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as f:
-                temp_path = f.name
+            temp_path = await self._synthesize_webm(text)
 
-            communicate = edge_tts.Communicate(text, self.voice)
-            communicate._rate = self.rate
-            communicate._pitch = self.pitch
-            communicate._volume = self.volume
-            await communicate.save(temp_path)
-
-            # Convert to WAV
+            # Convert to WAV and write to file
             process = await asyncio.create_subprocess_exec(
                 "ffmpeg", "-y",
                 "-i", temp_path,
@@ -112,7 +110,7 @@ class TTSClient:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            _, _ = await process.communicate()
+            await process.communicate()
 
         finally:
             if temp_path and os.path.exists(temp_path):

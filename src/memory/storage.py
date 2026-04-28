@@ -3,6 +3,7 @@
 
 Saves global_summary to disk after each compression cycle.
 Session data persists across restarts.
+Uses unified filename format: {YYYYMMDD}_{HHMMSS}_{ts}.json
 """
 
 import os
@@ -12,6 +13,8 @@ from pathlib import Path
 from typing import Optional
 
 import aiofiles
+
+from .naming import generate_filename
 
 
 SUMMARY_DIR = "/app/memory/summaries"
@@ -24,11 +27,44 @@ class SessionStorage:
         self.summary_dir = summary_dir
 
     def _get_filepath(self, session_id: str) -> str:
-        """Get filepath for session summary file."""
-        return os.path.join(self.summary_dir, f"{session_id}.json")
+        """Get filepath for session summary file.
+
+        Note: For new files, uses generate_filename(). For existing files
+        (load/delete), scans directory to find file with matching session_id.
+        """
+        return os.path.join(self.summary_dir, generate_filename(".json"))
+
+    def _find_file_by_session_id(self, session_id: str) -> Optional[str]:
+        """Find filepath by scanning files for matching session_id.
+
+        Args:
+            session_id: Session identifier to search for
+
+        Returns:
+            Full filepath if found, None otherwise
+        """
+        if not os.path.isdir(self.summary_dir):
+            return None
+
+        for filename in os.listdir(self.summary_dir):
+            if not filename.endswith(".json"):
+                continue
+            filepath = os.path.join(self.summary_dir, filename)
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    content = f.read()
+                data = json.loads(content)
+                if data.get("session_id") == session_id:
+                    return filepath
+            except (json.JSONDecodeError, OSError):
+                continue
+        return None
 
     async def save(self, session_id: str, global_summary: str) -> None:
         """Save session summary to disk.
+
+        Uses unified timestamp-based filename format.
+        The session_id is stored in the JSON content.
 
         Args:
             session_id: Session identifier
@@ -58,8 +94,8 @@ class SessionStorage:
         Returns:
             global_summary string if found, None otherwise
         """
-        filepath = self._get_filepath(session_id)
-        if not os.path.exists(filepath):
+        filepath = self._find_file_by_session_id(session_id)
+        if not filepath:
             return None
 
         try:
@@ -76,8 +112,8 @@ class SessionStorage:
         Args:
             session_id: Session identifier
         """
-        filepath = self._get_filepath(session_id)
-        if os.path.exists(filepath):
+        filepath = self._find_file_by_session_id(session_id)
+        if filepath and os.path.exists(filepath):
             os.remove(filepath)
 
 

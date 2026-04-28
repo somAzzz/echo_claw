@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from src.config import Config
 from src.memory.soul import load_soul_doc, save_soul_doc, clear_cache
+from src.memory import finalize_session
 from src.prompt_store import PromptStore
 
 
@@ -158,6 +159,21 @@ def update_soul(soul: SoulUpdate) -> dict:
     save_soul_doc(soul.content)
     clear_cache()  # Invalidate cached SOUL prompt
     return {"status": "updated"}
+
+
+class SessionEnd(BaseModel):
+    session_id: str
+
+
+@app.post("/api/session/end")
+async def session_end(session_id: str = "") -> dict:
+    """Finalize a session: write to global memory and cleanup.
+
+    This endpoint is designed to be called via navigator.sendBeacon()
+    when the user closes the browser tab.
+    """
+    result = await finalize_session(session_id)
+    return result
 
 
 if __name__ == "__main__":

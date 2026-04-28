@@ -28,9 +28,7 @@ from src.config import Config
 from src.http_api import app as http_app
 from src.browser_ws_handler import handle_browser
 from src.memory import get_session, cleanup_session, summarize_async, get_global_memory, get_cached_soul_prompt
-from src.pipeline.asr import ASRClient
-from src.pipeline.llm import LLMClient
-from src.pipeline.tts import TTSClient
+from src.pipeline import create_pipeline_clients, ASRClient, LLMClient, TTSClient
 from src.protocol.ws_protocol import (
     build_error,
     build_state_directive,
@@ -233,18 +231,7 @@ async def handle_esp32(websocket: ServerConnection) -> None:
     voice_session = None  # Will be created on audio_start
 
     # Create pipeline clients
-    asr = ASRClient(base_url=cfg.asr.base_url)
-    llm = LLMClient(
-        base_url=cfg.llm.base_url,
-        model=cfg.llm.model,
-        api_key=getattr(cfg.llm, "api_key", None),
-    )
-    tts = TTSClient(
-        voice=cfg.tts.voice,
-        rate=cfg.tts.rate,
-        pitch=cfg.tts.pitch,
-        volume=cfg.tts.volume,
-    )
+    asr, llm, tts = create_pipeline_clients(cfg)
 
     logger.info(f"ESP32 connected: {websocket.remote_address}")
 

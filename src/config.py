@@ -2,6 +2,7 @@
 
 Uses environment variables with fallback to config.yaml.
 """
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -9,11 +10,13 @@ from typing import Optional, Union
 
 import yaml
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class ASRConfig:
     """ASR configuration for FunASR HTTP API."""
-    base_url: str = "http://localhost:8081"
+    base_url: str = "http://localhost:8001"
     model: str = "paraformer-zh"
     sample_rate: int = 16000
 
@@ -22,16 +25,16 @@ class ASRConfig:
 class LLMConfig:
     """LLM configuration."""
     base_url: str = "http://localhost:8080/v1"
-    model: str = "gpt-4"
-    max_tokens: int = 512
+    model: str = "unsloth/gemma-4-E4B-it-GGUF:Q8_0"
+    max_tokens: int = 131072
     temperature: float = 0.7
 
 
 @dataclass
 class TTSConfig:
     """TTS configuration for edge-tts."""
-    voice: str = "zh-CN-XiaoxiaoNeural"
-    rate: str = "-42%"
+    voice: str = "zh-CN-YunxiaNeural"
+    rate: str = "-20%"
     pitch: str = "+13Hz"
     volume: str = "+0%"
     sample_rate: int = 16000
@@ -40,7 +43,6 @@ class TTSConfig:
 @dataclass
 class MemoryConfig:
     """Memory/session configuration."""
-    session_dir: str = "./memory/sessions"
     summary_dir: str = "./memory/summaries"
     max_rounds: int = 5
     idle_timeout: int = 120
@@ -114,6 +116,8 @@ class Config:
         if config_path.exists():
             with open(config_path) as f:
                 yaml_data = yaml.safe_load(f) or {}
+        else:
+            logger.warning("config.yaml not found at %s, using defaults and environment variables", config_path)
 
         # Load ASR config
         asr_data = yaml_data.get("asr", {})
@@ -145,7 +149,6 @@ class Config:
         # Load Memory config
         memory_data = yaml_data.get("memory", {})
         memory = MemoryConfig(
-            session_dir=os.environ.get("MEMORY_SESSION_DIR", memory_data.get("session_dir", "./memory/sessions")),
             summary_dir=os.environ.get("MEMORY_SUMMARY_DIR", memory_data.get("summary_dir", "./memory/summaries")),
             max_rounds=int(os.environ.get("MEMORY_MAX_ROUNDS", memory_data.get("max_rounds", 5))),
             idle_timeout=int(os.environ.get("MEMORY_IDLE_TIMEOUT", memory_data.get("idle_timeout", 120))),

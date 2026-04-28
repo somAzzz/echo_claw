@@ -9,9 +9,7 @@ import websockets
 from websockets import ServerConnection
 
 from src.config import Config
-from src.pipeline.asr import ASRClient
-from src.pipeline.llm import LLMClient
-from src.pipeline.tts import TTSClient
+from src.pipeline import create_pipeline_clients, ASRClient, LLMClient, TTSClient
 from src.protocol.ws_protocol import (
     build_error,
     build_llm_chunk,
@@ -19,7 +17,7 @@ from src.protocol.ws_protocol import (
     build_tts_complete,
     build_text,
 )
-from src.memory import get_session, get_global_memory
+from src.memory import get_session, get_global_memory, summarize_async, finalize_session
 from src.state_machine import StateMachine
 from src.utils.text_utils import filter_tts_text
 
@@ -44,56 +42,12 @@ async def handle_browser(websocket: ServerConnection) -> None:
     cfg = Config.get_config()
 
     sm = StateMachine()
-    asr = ASRClient(base_url=cfg.asr.base_url)
-    llm = LLMClient(
-        base_url=cfg.llm.base_url,
-        model=cfg.llm.model,
-        api_key=getattr(cfg.llm, "api_key", None),
-        max_tokens=cfg.llm.max_tokens,
-    )
-    tts = TTSClient(
-        voice=cfg.tts.voice,
-        rate=cfg.tts.rate,
-        pitch=cfg.tts.pitch,
-        volume=cfg.tts.volume,
-    )
-
-    sm = StateMachine()
-    asr = ASRClient(base_url=cfg.asr.base_url)
-    llm = LLMClient(
-        base_url=cfg.llm.base_url,
-        model=cfg.llm.model,
-        api_key=getattr(cfg.llm, "api_key", None),
-        max_tokens=cfg.llm.max_tokens,
-    )
-    tts = TTSClient(
-        voice=cfg.tts.voice,
-        rate=cfg.tts.rate,
-        pitch=cfg.tts.pitch,
-        volume=cfg.tts.volume,
-    )
+    asr, llm, tts = create_pipeline_clients(cfg)
 
     session_id = ""
     turn_id = 0
     audio_chunks = []
     voice_session = None  # Per-connection session for memory tracking
-
-    async def _finalize_session():
-        """Write session to global memory and cleanup."""
-        nonlocal voice_session, llm
-        if voice_session:
-            # Force summarize remaining turns before cleanup
-            if voice_session.recent_turns:
-                await voice_session.force_summarize(llm)
-
-            # Write to global memory if summary exists
-            if voice_session.global_summary and voice_session.global_summary != "暂无早期记忆记录。":
-                global_mem = _get_global_memory()
-                await global_mem.write(voice_session.session_id, voice_session.global_summary)
-                logger.info(f"Session {voice_session.session_id} summary written to global memory")
-
-            cleanup_session(voice_session.session_id)
-            voice_session = None
 
     try:
         async for message in websocket:
@@ -123,24 +77,34 @@ async def handle_browser(websocket: ServerConnection) -> None:
                     await run_browser_pipeline(websocket, sm, asr, llm, tts, session_id, turn_id, audio_chunks, voice_session)
 
                 elif msg_type == "text_input":
-                    # Direct text input (bypasses ASR)
+                    # Extract session_id from message (not provided in text_input messages)
+                    session_id = data.get("session_id", "")
                     user_text = data.get("text", "").strip()
                     prompt = data.get("prompt", "")
                     if user_text:
                         logger.info(f"text_input received: user_text='{user_text}', prompt='{prompt[:50] if prompt else 'empty'}...'")
                     if not voice_session:
                         voice_session = get_session(session_id or f"browser-{id(websocket)}")
-                    await run_text_pipeline(websocket, llm, tts, session_id, turn_id, user_text, prompt, voice_session)
+                    await run_text_pipeline(websocket, llm, tts, session_id, turn_id, user_text, prompt, voice_session, llm_client=llm)
 
                 elif msg_type == "cancel":
                     sm.handle_cancel()
+                    await websocket.send(build_state_directive(session_id, turn_id, "idle"))
+
+                elif msg_type == "session_end":
+                    # Explicit session end - finalize and cleanup
+                    logger.info(f"session_end received for session {session_id}")
+                    if voice_session:
+                        await finalize_session(voice_session.session_id)
+                        voice_session = None
                     await websocket.send(build_state_directive(session_id, turn_id, "idle"))
 
             else:
                 logger.warning("Received binary data on browser WebSocket - ignored")
 
     except websockets.exceptions.ConnectionClosed:
-        await _finalize_session()
+        if voice_session:
+            await finalize_session(voice_session.session_id)
         logger.info("Browser disconnected")
 
 
@@ -190,11 +154,12 @@ async def run_text_pipeline(
     user_text: str,
     prompt: str = "",
     voice_session = None,
+    llm_client = None,
 ) -> None:
     """Run LLM → TTS pipeline for direct text input (bypasses ASR)."""
     logger.info(f"run_text_pipeline called: user_text='{user_text}', session_id={session_id}, turn_id={turn_id}")
     await websocket.send(build_text(user_text, session_id, turn_id))
-    await run_llm_to_tts(websocket, llm, tts, session_id, turn_id, user_text, prompt, voice_session)
+    await run_llm_to_tts(websocket, llm, tts, session_id, turn_id, user_text, prompt, voice_session, llm_client)
 
 
 async def run_llm_to_tts(
@@ -206,6 +171,7 @@ async def run_llm_to_tts(
     user_text: str,
     prompt: str = "",
     voice_session = None,
+    llm_client = None,
 ) -> None:
     """Run LLM streaming followed by TTS synthesis."""
     logger.info(f"run_llm_to_tts called: user_text='{user_text}', prompt='{prompt[:50] if prompt else 'empty'}...'")
@@ -232,7 +198,7 @@ async def run_llm_to_tts(
         soul_rules=soul_rules,
     )
 
-    # Add user turn to session
+    # Add user turn to session (without async summarization - only assistant turn triggers it)
     voice_session.add_turn(role="user", content=user_text)
 
     # LLM streaming with built prompt
@@ -257,9 +223,9 @@ async def run_llm_to_tts(
         await websocket.send(build_error(str(e), session_id, turn_id))
         return
 
-    # Add assistant turn to session
+    # Add assistant turn to session (with async summarization)
     if full_response:
-        voice_session.add_turn(role="assistant", content=full_response)
+        voice_session.add_turn(role="assistant", content=full_response, llm_client=llm_client, summarize_callback=summarize_async)
         logger.info(f"Session {session_id}: {len(voice_session.recent_turns)} recent turns, global_summary length: {len(voice_session.global_summary)}")
 
     # TTS synthesis

@@ -7,9 +7,10 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
+    allowedHosts: ['.lan', '.local', '192.168.50.106'],
     proxy: {
       '/api': {
-        target: 'http://localhost:8766',
+        target: process.env.VITE_API_URL || 'http://python-hub:8766',
         changeOrigin: true,
       },
     },

@@ -5,7 +5,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - /home/bo/.cache/huggingface:/root/.cache/huggingface
+      - huggingface-cache:/root/.cache/huggingface
     environment:
       - DEVICE=SYCL
       - ONEAPI_DEVICE_SELECTOR=level_zero:0
@@ -57,10 +57,33 @@ services:
     depends_on:
       funasr-api:
         condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          memory: 2g
-        reservations:
-          memory: 512m
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8766/api/status')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
     restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://python-hub:8766
+    depends_on:
+      - python-hub
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5173/', r => { process.exit(r.statusCode === 200 ? 0 : 1) })"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  huggingface-cache:

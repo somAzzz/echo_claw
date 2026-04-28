@@ -19,6 +19,7 @@ from .rolling_session import (
     get_session_async,
     cleanup_session,
     cleanup_session_async,
+    finalize_session,
     summarize_async,
     get_summary_prompt,
 )
@@ -36,6 +37,7 @@ __all__ = [
     "get_session_async",
     "cleanup_session",
     "cleanup_session_async",
+    "finalize_session",
     "summarize_async",
     "get_summary_prompt",
     "SessionStorage",

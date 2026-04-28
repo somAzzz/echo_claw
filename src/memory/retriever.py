@@ -2,9 +2,13 @@
 
 import os
 import re
-from typing import List
+from typing import List, Optional
 
+import jieba
 from rank_bm25 import BM25Plus
+
+# Pre-load jieba dictionary at module level for faster first use
+jieba.initialize()
 
 
 # Trigger patterns for global memory recall
@@ -31,7 +35,6 @@ def tokenize_cn(text: str) -> List[str]:
     Chinese: jieba cutting for proper word boundaries.
     English/Python: word-level matching on whitespace.
     """
-    import jieba
     words = []
     for word in jieba.cut(text.lower()):
         if word.strip():
@@ -44,6 +47,54 @@ class GlobalRetriever:
 
     def __init__(self, global_dir: str = "./memory/global"):
         self.global_dir = global_dir
+        self.global_file = os.path.join(global_dir, "memory.md")
+        self._index: Optional[BM25Plus] = None
+        self._content_cache: List[str] = []
+
+    def _build_index(self) -> None:
+        """Build BM25 index from single memory.md file.
+
+        Parses entries by "---" separator, extracts body (skips front-matter).
+        Handles malformed entries by skipping them (with warning logged).
+        """
+        self._content_cache = []
+
+        if not os.path.exists(self.global_file):
+            self._index = None
+            return
+
+        with open(self.global_file, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Split by \n---\n separator to get entries
+        entries = content.split("\n---\n")
+
+        for entry in entries:
+            if not entry.strip():
+                continue
+
+            # Try to extract body (skip front-matter)
+            if entry.startswith("---"):
+                # Has front-matter: split twice to get body
+                parts = entry.split("\n---\n", 1)
+                if len(parts) > 1:
+                    body = parts[1]
+                else:
+                    body = entry
+            else:
+                # No front-matter, use entire entry
+                body = entry
+
+            body = body.strip()
+            if body:
+                self._content_cache.append(body)
+
+        # Build BM25 index
+        if self._content_cache:
+            tokenized_corpus = [tokenize_cn(doc) for doc in self._content_cache]
+            self._index = BM25Plus(tokenized_corpus)
+        else:
+            self._index = None
 
     def has_trigger(self, text: str) -> bool:
         """Check if text contains any global memory trigger phrase."""
@@ -53,68 +104,34 @@ class GlobalRetriever:
         return False
 
     def retrieve(self, query: str, top_k: int = 3) -> List[str]:
-        """Retrieve top-k most relevant global memory file contents.
+        """Retrieve top-k most relevant global memory entries.
 
-        Only returns files with a non-zero BM25 score.
-        Tie-breaking by filename descending = newer session first.
+        Only returns entries with a non-zero BM25 score.
+        Re-builds index if not yet built (lazy init).
 
         Args:
             query: User input text
-            top_k: Maximum number of files to return
+            top_k: Maximum number of entries to return
 
         Returns:
-            List of file contents, most relevant first
+            List of entry contents, most relevant first
         """
-        if not os.path.isdir(self.global_dir):
+        if self._index is None:
+            self._build_index()
+
+        if not self._content_cache or self._index is None:
             return []
 
-        files = sorted(
-            f for f in os.listdir(self.global_dir)
-            if f.endswith(".md")
-        )
-        if not files:
-            return []
-
-        corpus = []
-        file_paths = []
-        for fname in files:
-            path = os.path.join(self.global_dir, fname)
-            try:
-                content = self._load_content(path)
-                if content:
-                    corpus.append(content)
-                    file_paths.append(path)
-            except OSError:
-                continue
-
-        if not corpus:
-            return []
-
-        tokenized_corpus = [tokenize_cn(doc) for doc in corpus]
-        bm25 = BM25Plus(tokenized_corpus)
         query_tokens = tokenize_cn(query)
-        scores = bm25.get_scores(query_tokens)
+        scores = self._index.get_scores(query_tokens)
 
-        # Sort: descending score (primary), descending filename (tie-break = newest first)
-        # reverse=True: (high_score → low_score), (z → a) for filenames
+        # Pair scores with content
         scored = sorted(
-            zip(scores, file_paths, corpus),
-            key=lambda x: (x[0], x[1]),
+            enumerate(zip(self._content_cache, scores)),
+            key=lambda x: x[1][1],
             reverse=True,
         )
 
         # Filter zero scores, take top_k
-        result = [content for score, _, content in scored if score > 0][:top_k]
+        result = [content for idx, (content, score) in scored if score > 0][:top_k]
         return result
-
-    def _load_content(self, path: str) -> str:
-        """Load file content, skipping front-matter."""
-        with open(path, encoding="utf-8") as f:
-            content = f.read()
-
-        if content.startswith("---"):
-            parts = content.split("---", 2)
-            if len(parts) >= 3:
-                content = parts[2].lstrip("\n")
-
-        return content.strip()

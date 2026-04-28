@@ -10,7 +10,9 @@ import logging
 if TYPE_CHECKING:
     from ..pipeline.llm import LLMClient
 
+from .naming import generate_session_id
 from .storage import get_storage
+from .global_memory import get_global_memory
 
 logger = logging.getLogger(__name__)
 
@@ -117,8 +119,12 @@ class VoiceSession:
 
         # Check trigger conditions (async trigger, non-blocking)
         if self._should_summarize() and llm_client and summarize_callback:
-            asyncio.create_task(
+            task = asyncio.create_task(
                 summarize_callback(self, llm_client)
+            )
+            task.add_done_callback(
+                lambda t: logger.error(f"Summary task failed: {t.exception()}", exc_info=t.exception())
+                if t.exception() else None
             )
 
     def _should_summarize(self) -> bool:
@@ -140,21 +146,11 @@ class VoiceSession:
         if not self.recent_turns:
             return
 
-        # Check if we need to compress or just use as-is
-        if self.global_summary == "暂无早期记忆记录。":
-            # No prior summary - just merge all turns directly
-            await summarize_async(
-                session=self,
-                llm_client=llm_client,
-                merge_all=True,
-            )
-        else:
-            # Has prior summary - fuse with existing
-            await summarize_async(
-                session=self,
-                llm_client=llm_client,
-                merge_all=True,
-            )
+        await summarize_async(
+            session=self,
+            llm_client=llm_client,
+            merge_all=True,
+        )
 
 
 async def summarize_async(
@@ -245,23 +241,46 @@ def get_summary_prompt(current_summary: str, new_history: str) -> str:
 
 # Global session registry
 _sessions: Dict[str, VoiceSession] = {}
+MAX_SESSIONS = 100
 
 
-def get_session(session_id: str, **kwargs) -> VoiceSession:
+def _evict_oldest_sessions() -> None:
+    """Remove oldest sessions if registry exceeds MAX_SESSIONS."""
+    if len(_sessions) <= MAX_SESSIONS:
+        return
+    # Sort by most recent turn timestamp, keep newest MAX_SESSIONS
+    sorted_sessions = sorted(
+        _sessions.items(),
+        key=lambda item: max((t.timestamp for t in item[1].recent_turns), default=0),
+        reverse=True,
+    )
+    for sid, _ in sorted_sessions[MAX_SESSIONS:]:
+        del _sessions[sid]
+        logger.info("Evicted idle session: %s", sid)
+
+
+def get_session(session_id: Optional[str], **kwargs) -> VoiceSession:
     """Get or create a session by ID (sync version for main.py).
 
     Note: Does not load from disk. Use get_session_async for disk persistence.
+    If session_id is None or empty, generates a new one using NamingService.
     """
+    if not session_id:
+        session_id = generate_session_id()
     if session_id not in _sessions:
+        _evict_oldest_sessions()
         _sessions[session_id] = VoiceSession(session_id=session_id, **kwargs)
     return _sessions[session_id]
 
 
-async def get_session_async(session_id: str, **kwargs) -> VoiceSession:
+async def get_session_async(session_id: Optional[str], **kwargs) -> VoiceSession:
     """Get or create a session by ID with disk persistence.
 
     Loads persisted global_summary from disk if available.
+    If session_id is None or empty, generates a new one using NamingService.
     """
+    if not session_id:
+        session_id = generate_session_id()
     if session_id not in _sessions:
         # Try to load persisted summary from disk
         storage = get_storage()
@@ -290,3 +309,41 @@ async def cleanup_session_async(session_id: str) -> None:
         del _sessions[session_id]
     storage = get_storage()
     await storage.delete(session_id)
+
+
+async def finalize_session(session_id: str) -> dict:
+    """Finalize session: write to global memory and cleanup.
+
+    Returns dict with:
+        - success: bool
+        - summary_length: int (chars written)
+        - turns_count: int
+    """
+    if session_id not in _sessions:
+        logger.warning(f"finalize_session: session {session_id} not found")
+        return {"success": False, "error": "session not found", "summary_length": 0, "turns_count": 0}
+
+    voice_session = _sessions[session_id]
+
+    # Build summary from recent turns if no summarization happened
+    summary_to_write = voice_session.global_summary
+    if not summary_to_write or summary_to_write == "暂无早期记忆记录。":
+        if voice_session.recent_turns:
+            summary_to_write = "\n".join([
+                f"{t.role}: {t.content}" for t in voice_session.recent_turns[-10:]
+            ])
+        else:
+            summary_to_write = None
+
+    # Write to global memory if we have content
+    result = {"success": False, "summary_length": 0, "turns_count": len(voice_session.recent_turns)}
+    if summary_to_write:
+        global_mem = get_global_memory()
+        await global_mem.write(voice_session.session_id, summary_to_write)
+        logger.info(f"Session {voice_session.session_id} written to global memory ({len(summary_to_write)} chars)")
+        result["success"] = True
+        result["summary_length"] = len(summary_to_write)
+
+    # Remove from registry
+    del _sessions[session_id]
+    return result

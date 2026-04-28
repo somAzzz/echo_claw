@@ -1,7 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Mic, MicOff, Square, Settings, MessageSquare, FileText, Zap, Volume2, Send, Trash2 } from 'lucide-react';
+import { Mic, Square, Settings, MessageSquare, FileText, Zap, Volume2, Send } from 'lucide-react';
 import * as api from './services/api';
-import { connect, sendAudioStart, sendAudioEnd, sendCancel, disconnect, sendTextInput } from './services/websocket';
+import { BrowserWebSocket } from './services/websocket';
+import { useWebSocket } from './hooks/useWebSocket';
+import StatusBadge from './components/StatusBadge';
+import ConnectionIndicator from './components/ConnectionIndicator';
+import MessageBubble from './components/MessageBubble';
 
 const STATES = {
   IDLE: 'idle',
@@ -19,80 +23,20 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
   const [error, setError] = useState(null);
-  const [wsConnected, setWsConnected] = useState(false);
   const [newPromptName, setNewPromptName] = useState('');
   const [manualInput, setManualInput] = useState('');
   const [hasAudio, setHasAudio] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const audioContextRef = useRef(null);
   const mountedRef = useRef(true);
-  const audioDataRef = useRef(null);  // Complete audio data for non-streaming playback
+  const audioDataRef = useRef(null);
 
-  const sessionId = useRef(`session-${Date.now()}`);
+  const sessionId = useRef(`ts-${Date.now()}`);
 
-  // Load initial data
-  useEffect(() => {
-    async function loadData() {
-      try {
-        const [promptsData, configData] = await Promise.all([
-          api.fetchPrompts(),
-          api.fetchConfig(),
-        ]);
-        setPrompts(promptsData);
-        // Merge server config with localStorage overrides (localStorage takes precedence)
-        const savedTtsSettings = localStorage.getItem('ttsSettings');
-        if (savedTtsSettings) {
-          const parsed = JSON.parse(savedTtsSettings);
-          setConfig({
-            ...configData.tts,
-            ...parsed,
-          });
-        } else {
-          setConfig(configData.tts);
-        }
-        if (promptsData.length > 0) {
-          setSelectedPrompt(promptsData[0]);
-          // Fetch content for first prompt
-          const content = await api.fetchPrompt(promptsData[0]);
-          setPromptContent(content);
-        }
-      } catch (err) {
-        setError(err.message);
-      }
-    }
-    loadData();
-  }, []);
-
-  // Connect WebSocket
-  useEffect(() => {
-    async function initWs() {
-      try {
-        await connect(
-          (data) => {
-            if (!mountedRef.current) return;
-            handleWsMessage(data);
-          },
-          (state) => {
-            if (!mountedRef.current) return;
-            setStatus(state);
-          }
-        );
-        if (mountedRef.current) setWsConnected(true);
-      } catch (err) {
-        if (mountedRef.current) setError('Failed to connect to voice service');
-      }
-    }
-
-    initWs();
-
-    return () => {
-      mountedRef.current = false;
-      disconnect();
-    };
-  }, []);
-
+  // WebSocket message handler
   const handleWsMessage = useCallback((data) => {
     switch (data.type) {
       case 'text':
@@ -117,10 +61,9 @@ function App() {
         });
         break;
       case 'tts_complete':
-        // Complete audio data received (non-streaming mode)
         if (typeof data.data === 'string') {
           audioDataRef.current = data.data;
-          console.log('[Audio] Received tts_complete, length:', data.data.length, 'first 20 chars:', data.data.substring(0, 20));
+          console.log('[Audio] Received tts_complete, length:', data.data.length);
         } else {
           console.log('[Audio] Received tts_complete with non-string data, type:', typeof data.data);
         }
@@ -145,6 +88,55 @@ function App() {
     }
   }, []);
 
+  // Connect WebSocket via hook
+  const { wsConnected, getWs } = useWebSocket(handleWsMessage, setStatus);
+
+  // Load initial data
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const [promptsData, configData] = await Promise.all([
+          api.fetchPrompts(),
+          api.fetchConfig(),
+        ]);
+        setPrompts(promptsData);
+        const savedTtsSettings = localStorage.getItem('ttsSettings');
+        if (savedTtsSettings) {
+          const parsed = JSON.parse(savedTtsSettings);
+          setConfig({ ...configData.tts, ...parsed });
+        } else {
+          setConfig(configData.tts);
+        }
+        if (promptsData.length > 0) {
+          setSelectedPrompt(promptsData[0]);
+          const content = await api.fetchPrompt(promptsData[0]);
+          setPromptContent(content);
+        }
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadData();
+  }, []);
+
+  // Handle browser/tab close
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      const ws = new BrowserWebSocket();
+      ws.sendSessionEnd(sessionId.current);
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      mountedRef.current = false;
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      const ws = new BrowserWebSocket();
+      ws.sendSessionEnd(sessionId.current);
+    };
+  }, []);
+
   const playFullAudio = useCallback(() => {
     const b64 = audioDataRef.current;
     if (!b64) {
@@ -163,7 +155,6 @@ function App() {
         bytes[i] = binaryString.charCodeAt(i);
       }
 
-      // Create AudioContext if needed
       if (!audioContextRef.current) {
         audioContextRef.current = new AudioContext();
       }
@@ -212,7 +203,7 @@ function App() {
       mediaRecorder.start(100);
       setIsRecording(true);
       setError(null);
-      sendAudioStart(sessionId.current);
+      getWs().sendAudioStart(sessionId.current);
       setStatus(STATES.LISTENING);
     } catch (err) {
       setError('Microphone access denied. Please enable microphone permissions.');
@@ -231,23 +222,24 @@ function App() {
     if (audioChunksRef.current.length === 0) return;
 
     const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-    const arrayBuffer = await audioBlob.arrayBuffer();
 
-    // Convert to base64
-    const bytes = new Uint8Array(arrayBuffer);
-    let binary = '';
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    const b64Audio = btoa(binary);
+    const b64Audio = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const dataUrl = reader.result;
+        const base64 = dataUrl.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(audioBlob);
+    });
 
-    // For simplicity, we'll send as text chunks since the server expects base64
-    // In a real implementation, you'd use the audio_chunk message type
-    sendAudioEnd();
+    getWs().sendAudioChunk(b64Audio);
+    getWs().sendAudioEnd();
   };
 
   const handleCancel = () => {
-    sendCancel();
+    getWs().sendCancel();
     setIsRecording(false);
     setStatus(STATES.IDLE);
     audioDataRef.current = null;
@@ -277,7 +269,6 @@ function App() {
 
   const handleCreatePrompt = async () => {
     if (!newPromptName.trim()) return;
-    // Validate: only alphanumeric, dash, underscore allowed
     if (!/^[a-zA-Z0-9_-]+$/.test(newPromptName.trim())) {
       setError('名字只能包含字母、数字、下划线和短横线');
       return;
@@ -321,7 +312,6 @@ function App() {
     setConfig(newConfig);
     try {
       await api.updateConfig(newConfig);
-      // Save TTS settings to localStorage for persistence
       if (['voice', 'rate', 'pitch', 'volume'].includes(key)) {
         localStorage.setItem('ttsSettings', JSON.stringify(newConfig));
       }
@@ -335,7 +325,7 @@ function App() {
     const text = manualInput.trim();
     setManualInput('');
     setStatus(STATES.PROCESSING);
-    sendTextInput(text, promptContent);
+    getWs().sendTextInput(text, promptContent, sessionId.current);
   };
 
   return (
@@ -365,6 +355,12 @@ function App() {
         <div className="mb-6 p-4 bg-red-500/10 border border-red-500/50 rounded-lg text-red-400 font-mono text-sm animate-slide-up">
           <span className="text-red-500">ERROR: </span>
           {error}
+        </div>
+      )}
+
+      {loading && !wsConnected && (
+        <div className="mb-6 p-4 bg-neon-cyan/5 border border-neon-cyan/20 rounded-lg text-neon-cyan font-mono text-sm text-center animate-pulse">
+          Initializing system...
         </div>
       )}
 
@@ -492,30 +488,7 @@ function App() {
               )}
 
               {messages.map((message, index) => (
-                <div
-                  key={index}
-                  className={`animate-slide-up ${
-                    message.role === 'user'
-                      ? 'text-right'
-                      : ''
-                  }`}
-                >
-                  <div
-                    className={`inline-block max-w-[80%] px-4 py-2 rounded-lg text-sm font-mono ${
-                      message.role === 'user'
-                        ? 'bg-neon-cyan/10 border border-neon-cyan/30 text-neon-cyan'
-                        : 'bg-neon-purple/10 border border-neon-purple/30 text-gray-200'
-                    }`}
-                  >
-                    <span className="text-xs opacity-50 block mb-1">
-                      {message.role === 'user' ? 'USER' : 'ASSISTANT'}
-                    </span>
-                    {message.text}
-                    {!message.complete && message.role === 'assistant' && (
-                      <span className="inline-block w-2 h-3 bg-neon-purple ml-1 animate-pulse" />
-                    )}
-                  </div>
-                </div>
+                <MessageBubble key={index} message={message} />
               ))}
             </div>
 
@@ -660,35 +633,6 @@ function App() {
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function StatusBadge({ status }) {
-  const colors = {
-    idle: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
-    listening: 'bg-neon-cyan/20 text-neon-cyan border-neon-cyan/30 animate-pulse',
-    processing: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30 animate-pulse',
-    speaking: 'bg-neon-purple/20 text-neon-purple border-neon-purple/30 animate-pulse',
-  };
-
-  return (
-    <div className={`px-4 py-2 rounded-full border text-xs font-mono font-semibold ${colors[status] || colors.idle}`}>
-      <span className="inline-block w-2 h-2 rounded-full bg-current mr-2 animate-pulse" />
-      {status.toUpperCase()}
-    </div>
-  );
-}
-
-function ConnectionIndicator({ connected }) {
-  return (
-    <div className={`flex items-center gap-2 px-3 py-2 rounded-full border text-xs font-mono ${
-      connected
-        ? 'bg-neon-green/10 text-neon-green border-neon-green/30'
-        : 'bg-red-500/10 text-red-400 border-red-500/30'
-    }`}>
-      <span className={`w-2 h-2 rounded-full ${connected ? 'bg-neon-green' : 'bg-red-400'} animate-pulse`} />
-      {connected ? 'CONNECTED' : 'DISCONNECTED'}
     </div>
   );
 }
