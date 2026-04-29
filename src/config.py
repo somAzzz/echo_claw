@@ -31,6 +31,16 @@ class LLMConfig:
 
 
 @dataclass
+class OnlineLLMConfig:
+    """Online LLM configuration (DeepSeek, OpenAI, etc.)."""
+    base_url: str = "https://api.deepseek.com/v1"
+    model: str = "deepseek-v4-flash"
+    api_key: str = ""
+    max_tokens: int = 8192
+    temperature: float = 0.7
+
+
+@dataclass
 class TTSConfig:
     """TTS configuration for edge-tts."""
     voice: str = "zh-CN-YunxiaNeural"
@@ -74,11 +84,13 @@ class Config:
     """Main configuration class with dataclasses."""
     asr: ASRConfig = field(default_factory=ASRConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
+    online_llm: OnlineLLMConfig = field(default_factory=OnlineLLMConfig)
     tts: TTSConfig = field(default_factory=TTSConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
     backpressure: BackpressureConfig = field(default_factory=BackpressureConfig)
     prompt_dir: str = "./prompts"
+    active_chat_llm: str = "local"  # "local" or "online"
 
     _instance: Optional["Config"] = None
 
@@ -167,6 +179,19 @@ class Config:
             keepalive_timeout=int(os.environ.get("SERVER_KEEPALIVE_TIMEOUT", server_data.get("keepalive_timeout", 30))),
         )
 
+        # Load Online LLM config
+        online_llm_data = yaml_data.get("online_llm", {})
+        online_llm = OnlineLLMConfig(
+            base_url=os.environ.get("ONLINE_LLM_BASE_URL", online_llm_data.get("base_url", "https://api.deepseek.com/v1")),
+            model=os.environ.get("ONLINE_LLM_MODEL", online_llm_data.get("model", "deepseek-chat")),
+            api_key=os.environ.get("DEEPSEEK_API_KEY", online_llm_data.get("api_key", "")),
+            max_tokens=int(os.environ.get("ONLINE_LLM_MAX_TOKENS", online_llm_data.get("max_tokens", 8192))),
+            temperature=float(os.environ.get("ONLINE_LLM_TEMPERATURE", online_llm_data.get("temperature", 0.7))),
+        )
+
+        # Load active chat LLM mode
+        active_chat_llm = os.environ.get("ACTIVE_CHAT_LLM", yaml_data.get("active_chat_llm", "local"))
+
         # Load prompt directory
         prompt_dir = os.environ.get("PROMPT_DIR", yaml_data.get("prompt_dir", "./prompts"))
 
@@ -181,11 +206,13 @@ class Config:
         return cls(
             asr=asr,
             llm=llm,
+            online_llm=online_llm,
             tts=tts,
             memory=memory,
             server=server,
             backpressure=backpressure,
             prompt_dir=prompt_dir,
+            active_chat_llm=active_chat_llm,
         )
 
     @classmethod

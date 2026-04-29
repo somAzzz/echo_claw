@@ -26,6 +26,7 @@ class ConfigUpdate(BaseModel):
     rate: str = None
     pitch: str = None
     volume: str = None
+    active_chat_llm: str = None  # "local" or "online"
 
 
 app = FastAPI(title="Voice Assistant Hub API")
@@ -102,7 +103,11 @@ def get_config() -> dict:
             "rate": config.tts.rate,
             "pitch": config.tts.pitch,
             "volume": config.tts.volume,
-        }
+        },
+        "llm": {
+            "active_chat_llm": config.active_chat_llm,
+            "online_model": config.online_llm.model,
+        },
     }
 
 
@@ -117,6 +122,8 @@ def update_config(cfg: ConfigUpdate) -> dict:
         config.tts.pitch = cfg.pitch
     if cfg.volume is not None:
         config.tts.volume = cfg.volume
+    if cfg.active_chat_llm is not None:
+        config.active_chat_llm = cfg.active_chat_llm
     return {"status": "updated"}
 
 

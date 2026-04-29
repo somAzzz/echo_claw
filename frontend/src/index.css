@@ -4,15 +4,30 @@
 
 @layer base {
   body {
-    @apply bg-dark-bg text-gray-200 antialiased;
+    @apply font-body text-ac-brown;
+    background-color: #F9F3E4;
     background-image:
-      radial-gradient(ellipse at top, rgba(0, 255, 255, 0.03) 0%, transparent 50%),
-      radial-gradient(ellipse at bottom, rgba(139, 92, 246, 0.03) 0%, transparent 50%);
+      /* Grass texture at bottom */
+      repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(123, 196, 127, 0.03) 2px,
+        rgba(123, 196, 127, 0.03) 4px
+      ),
+      /* Subtle clouds */
+      radial-gradient(ellipse 60% 40% at 20% 10%, rgba(135, 206, 235, 0.15) 0%, transparent 50%),
+      radial-gradient(ellipse 40% 30% at 70% 15%, rgba(135, 206, 235, 0.12) 0%, transparent 50%),
+      radial-gradient(ellipse 50% 35% at 85% 8%, rgba(135, 206, 235, 0.10) 0%, transparent 50%),
+      /* Warm gradient base */
+      linear-gradient(180deg, #F0E6D3 0%, #F9F3E4 30%, #FDF8F0 60%, #F9F3E4 100%),
+      /* Noise texture overlay */
+      url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
     min-height: 100vh;
   }
 
   ::selection {
-    @apply bg-neon-cyan/30 text-neon-cyan;
+    @apply bg-ac-leaf/20 text-ac-leaf-dark;
   }
 
   ::-webkit-scrollbar {
@@ -21,46 +36,104 @@
   }
 
   ::-webkit-scrollbar-track {
-    @apply bg-dark-bg;
+    background: #F0E6D3;
+    border-radius: 8px;
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply bg-dark-border rounded-full;
+    background: #C4A88B;
+    border-radius: 8px;
+    border: 2px solid #F0E6D3;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-neon-cyan/50;
+    background: #A88B70;
   }
 }
 
 @layer components {
   .btn-primary {
-    @apply px-6 py-3 bg-neon-cyan/10 border border-neon-cyan/50 text-neon-cyan font-mono font-semibold
-           rounded-lg transition-all duration-200
-           hover:bg-neon-cyan/20 hover:border-neon-cyan hover:shadow-[0_0_20px_rgba(0,255,255,0.3)]
-           active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply px-6 py-3 bg-ac-leaf text-white font-body font-bold
+           rounded-2xl transition-all duration-200 shadow-ac-button
+           hover:bg-ac-leaf-dark hover:-translate-y-0.5 hover:shadow-ac-hover
+           active:translate-y-0 active:shadow-ac-button
+           disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:bg-ac-leaf;
+  }
+
+  .btn-ghost {
+    @apply px-4 py-2 bg-ac-card border-2 border-ac-tan text-ac-brown font-body font-semibold
+           rounded-2xl transition-all duration-200
+           hover:bg-ac-warm hover:border-ac-brown-light hover:-translate-y-0.5
+           active:translate-y-0
+           disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0;
   }
 
   .btn-danger {
-    @apply px-6 py-3 bg-red-500/10 border border-red-500/50 text-red-400 font-mono font-semibold
-           rounded-lg transition-all duration-200
-           hover:bg-red-500/20 hover:border-red-500 hover:shadow-[0_0_20px_rgba(255,0,0,0.3)]
-           active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply px-4 py-2 bg-ac-peach/50 border-2 border-ac-error/60 text-ac-brown-dark font-body font-semibold
+           rounded-2xl transition-all duration-200
+           hover:bg-ac-error/20 hover:border-ac-error hover:-translate-y-0.5
+           active:translate-y-0;
   }
 
   .panel {
-    @apply bg-dark-panel/80 backdrop-blur-sm border border-dark-border rounded-xl p-4;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    @apply bg-ac-card border-2 border-ac-tan-light rounded-3xl p-5 shadow-ac-card;
   }
 
   .input-field {
-    @apply w-full px-4 py-2 bg-dark-bg border border-dark-border rounded-lg
-           text-gray-200 font-mono text-sm
-           focus:outline-none focus:border-neon-cyan/50 focus:ring-1 focus:ring-neon-cyan/20
-           placeholder:text-gray-500 transition-all duration-200;
+    @apply w-full px-4 py-3 bg-white border-2 border-ac-tan-light rounded-2xl
+           text-ac-brown font-body text-sm
+           focus:outline-none focus:border-ac-leaf focus:ring-2 focus:ring-ac-leaf/15
+           placeholder:text-ac-brown-light/50 transition-all duration-200;
   }
 
   .label {
-    @apply block text-xs font-mono text-gray-400 uppercase tracking-wider mb-2;
+    @apply block text-xs font-body font-bold text-ac-brown-light uppercase tracking-wider mb-2;
+  }
+
+  /* Decorative leaf accent for panels */
+  .panel-leaf {
+    position: relative;
+  }
+
+  .panel-leaf::before {
+    content: '🍃';
+    position: absolute;
+    top: -12px;
+    right: 16px;
+    font-size: 1.25rem;
+    filter: drop-shadow(0 1px 2px rgba(93,64,55,0.15));
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* Speech bubble tail */
+  .bubble-user {
+    position: relative;
+  }
+
+  .bubble-user::after {
+    content: '';
+    position: absolute;
+    right: -8px;
+    top: 50%;
+    transform: translateY(-50%);
+    border-left: 10px solid #E8F5E9;
+    border-top: 8px solid transparent;
+    border-bottom: 8px solid transparent;
+  }
+
+  .bubble-assistant {
+    position: relative;
+  }
+
+  .bubble-assistant::after {
+    content: '';
+    position: absolute;
+    left: -8px;
+    top: 50%;
+    transform: translateY(-50%);
+    border-right: 10px solid #FFF3E0;
+    border-top: 8px solid transparent;
+    border-bottom: 8px solid transparent;
   }
 }

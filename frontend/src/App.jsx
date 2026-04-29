@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Mic, Square, Settings, MessageSquare, FileText, Zap, Volume2, Send } from 'lucide-react';
+import { Mic, Square, Settings, MessageSquare, FileText, Volume2, Send } from 'lucide-react';
 import * as api from './services/api';
 import { BrowserWebSocket } from './services/websocket';
 import { useWebSocket } from './hooks/useWebSocket';
 import StatusBadge from './components/StatusBadge';
 import ConnectionIndicator from './components/ConnectionIndicator';
 import MessageBubble from './components/MessageBubble';
+import LionMascot from './components/LionMascot';
 
 const STATES = {
   IDLE: 'idle',
@@ -20,13 +21,13 @@ function App() {
   const [selectedPrompt, setSelectedPrompt] = useState('');
   const [promptContent, setPromptContent] = useState('');
   const [config, setConfig] = useState({ voice: '', rate: '', pitch: '', volume: '' });
+  const [llmMode, setLlmMode] = useState('local');
   const [messages, setMessages] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
   const [error, setError] = useState(null);
   const [newPromptName, setNewPromptName] = useState('');
   const [manualInput, setManualInput] = useState('');
   const [hasAudio, setHasAudio] = useState(false);
-  const [loading, setLoading] = useState(true);
 
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -36,7 +37,6 @@ function App() {
 
   const sessionId = useRef(`ts-${Date.now()}`);
 
-  // WebSocket message handler
   const handleWsMessage = useCallback((data) => {
     switch (data.type) {
       case 'text':
@@ -63,9 +63,6 @@ function App() {
       case 'tts_complete':
         if (typeof data.data === 'string') {
           audioDataRef.current = data.data;
-          console.log('[Audio] Received tts_complete, length:', data.data.length);
-        } else {
-          console.log('[Audio] Received tts_complete with non-string data, type:', typeof data.data);
         }
         setHasAudio(true);
         setStatus(STATES.IDLE);
@@ -88,10 +85,8 @@ function App() {
     }
   }, []);
 
-  // Connect WebSocket via hook
   const { wsConnected, getWs } = useWebSocket(handleWsMessage, setStatus);
 
-  // Load initial data
   useEffect(() => {
     async function loadData() {
       try {
@@ -107,6 +102,9 @@ function App() {
         } else {
           setConfig(configData.tts);
         }
+        if (configData.llm) {
+          setLlmMode(configData.llm.active_chat_llm || 'local');
+        }
         if (promptsData.length > 0) {
           setSelectedPrompt(promptsData[0]);
           const content = await api.fetchPrompt(promptsData[0]);
@@ -114,14 +112,11 @@ function App() {
         }
       } catch (err) {
         setError(err.message);
-      } finally {
-        setLoading(false);
       }
     }
     loadData();
   }, []);
 
-  // Handle browser/tab close
   useEffect(() => {
     const handleBeforeUnload = () => {
       const ws = new BrowserWebSocket();
@@ -140,11 +135,9 @@ function App() {
   const playFullAudio = useCallback(() => {
     const b64 = audioDataRef.current;
     if (!b64) {
-      console.log('[Audio] No audio to play');
       setHasAudio(false);
       return;
     }
-
     audioDataRef.current = null;
     setHasAudio(false);
 
@@ -154,30 +147,21 @@ function App() {
       for (let i = 0; i < binaryString.length; i++) {
         bytes[i] = binaryString.charCodeAt(i);
       }
-
       if (!audioContextRef.current) {
         audioContextRef.current = new AudioContext();
       }
-
       audioContextRef.current.decodeAudioData(
         bytes.buffer,
         (buffer) => {
-          console.log('[Audio] Audio decoded successfully, duration:', buffer.duration);
           const source = audioContextRef.current.createBufferSource();
           source.buffer = buffer;
           source.connect(audioContextRef.current.destination);
           source.start();
-          source.onended = () => {
-            setStatus(STATES.IDLE);
-          };
+          source.onended = () => setStatus(STATES.IDLE);
         },
-        (err) => {
-          console.error('[Audio] decode error:', err);
-          setHasAudio(false);
-        }
+        () => setHasAudio(false)
       );
-    } catch (err) {
-      console.error('[Audio] Playback error:', err.message);
+    } catch {
       setHasAudio(false);
     }
   }, []);
@@ -205,7 +189,7 @@ function App() {
       setError(null);
       getWs().sendAudioStart(sessionId.current);
       setStatus(STATES.LISTENING);
-    } catch (err) {
+    } catch {
       setError('Microphone access denied. Please enable microphone permissions.');
     }
   };
@@ -220,20 +204,16 @@ function App() {
 
   const sendAudio = async () => {
     if (audioChunksRef.current.length === 0) return;
-
     const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-
     const b64Audio = await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onloadend = () => {
-        const dataUrl = reader.result;
-        const base64 = dataUrl.split(',')[1];
+        const base64 = reader.result.split(',')[1];
         resolve(base64);
       };
       reader.onerror = reject;
       reader.readAsDataURL(audioBlob);
     });
-
     getWs().sendAudioChunk(b64Audio);
     getWs().sendAudioEnd();
   };
@@ -270,7 +250,7 @@ function App() {
   const handleCreatePrompt = async () => {
     if (!newPromptName.trim()) return;
     if (!/^[a-zA-Z0-9_-]+$/.test(newPromptName.trim())) {
-      setError('名字只能包含字母、数字、下划线和短横线');
+      setError('Name can only contain letters, numbers, underscores, and dashes.');
       return;
     }
     try {
@@ -307,6 +287,15 @@ function App() {
     }
   };
 
+  const handleLlmModeChange = async (mode) => {
+    setLlmMode(mode);
+    try {
+      await api.updateConfig({ active_chat_llm: mode });
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   const handleConfigChange = async (key, value) => {
     const newConfig = { ...config, [key]: value };
     setConfig(newConfig);
@@ -329,19 +318,24 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-dark-bg text-gray-200 p-6">
+    <div className="min-h-screen font-body text-ac-brown p-6">
       {/* Header */}
-      <header className="flex items-center justify-between mb-8">
+      <header className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-4">
-          <div className="relative">
-            <Zap className="w-10 h-10 text-neon-cyan animate-pulse" />
-            <div className="absolute inset-0 w-10 h-10 bg-neon-cyan/20 rounded-full blur-xl animate-pulse-slow" />
+          {/* House icon with leaf */}
+          <div className="relative animate-float">
+            <div className="w-14 h-14 bg-ac-leaf/15 border-2 border-ac-leaf/30 rounded-3xl flex items-center justify-center shadow-ac-soft">
+              <span className="text-2xl">🏠</span>
+            </div>
+            <span className="absolute -top-1 -right-1 text-lg animate-leaf-fall">🍃</span>
           </div>
           <div>
-            <h1 className="font-display text-2xl font-bold tracking-wider text-neon-cyan">
-              VOICE ASSISTANT HUB
+            <h1 className="font-display text-2xl font-semibold tracking-tight text-ac-brown-dark">
+              岛民小助手
             </h1>
-            <p className="text-xs text-gray-500 font-mono">v1.0 // SYSTEM ONLINE</p>
+            <p className="text-sm text-ac-brown-light flex items-center gap-1">
+              <span className="text-ac-leaf">✦</span> 动森风格语音对话
+            </p>
           </div>
         </div>
 
@@ -351,27 +345,23 @@ function App() {
         </div>
       </header>
 
+      {/* Error Banner */}
       {error && (
-        <div className="mb-6 p-4 bg-red-500/10 border border-red-500/50 rounded-lg text-red-400 font-mono text-sm animate-slide-up">
-          <span className="text-red-500">ERROR: </span>
-          {error}
-        </div>
-      )}
-
-      {loading && !wsConnected && (
-        <div className="mb-6 p-4 bg-neon-cyan/5 border border-neon-cyan/20 rounded-lg text-neon-cyan font-mono text-sm text-center animate-pulse">
-          Initializing system...
+        <div className="mb-6 p-4 bg-ac-peach/40 border-2 border-ac-error/40 rounded-2xl text-ac-brown-dark text-sm font-body font-semibold animate-pop-in flex items-center gap-2">
+          <span className="text-lg">😿</span>
+          <span>{error}</span>
         </div>
       )}
 
       {/* Main Grid */}
-      <div className="grid grid-cols-12 gap-6">
-        {/* Left Panel - Prompts */}
-        <div className="col-span-3 space-y-6">
-          <div className="panel">
+      <div className="grid grid-cols-12 gap-5">
+        {/* Left Panel */}
+        <div className="col-span-3 space-y-5">
+          {/* Prompts Panel */}
+          <div className="panel panel-leaf">
             <div className="flex items-center gap-2 mb-4">
-              <FileText className="w-4 h-4 text-neon-purple" />
-              <h2 className="text-sm font-mono font-semibold text-gray-300 uppercase tracking-wider">
+              <span className="text-lg">📝</span>
+              <h2 className="text-sm font-display font-semibold text-ac-brown-dark uppercase tracking-wide">
                 System Prompts
               </h2>
             </div>
@@ -384,11 +374,8 @@ function App() {
                 className="input-field flex-1"
                 placeholder="New prompt name..."
               />
-              <button
-                onClick={handleCreatePrompt}
-                className="px-4 py-2 bg-neon-purple/20 border border-neon-purple/50 text-neon-purple font-mono text-sm rounded-lg hover:bg-neon-purple/30 transition-colors"
-              >
-                ADD
+              <button onClick={handleCreatePrompt} className="btn-primary text-sm px-4 py-2">
+                +
               </button>
             </div>
 
@@ -398,33 +385,31 @@ function App() {
               className="input-field mb-4"
             >
               {prompts.map((prompt) => (
-                <option key={prompt} value={prompt}>
-                  {prompt}
-                </option>
+                <option key={prompt} value={prompt}>{prompt}</option>
               ))}
             </select>
 
             <textarea
               value={promptContent}
               onChange={(e) => setPromptContent(e.target.value)}
-              className="input-field h-48 resize-none mb-4"
-              placeholder="Prompt content..."
+              className="input-field h-44 resize-none mb-4"
+              placeholder="Write your prompt here..."
             />
 
             <button onClick={handleSavePrompt} className="btn-primary w-full text-sm mb-2">
-              SAVE PROMPT
+              <span className="mr-1">💾</span> Save
             </button>
-            <button onClick={handleDeletePrompt} className="w-full py-2 px-4 bg-red-500/10 border border-red-500/30 text-red-400 font-mono text-sm rounded-lg hover:bg-red-500/20 transition-colors">
-              DELETE PROMPT
+            <button onClick={handleDeletePrompt} className="btn-danger w-full text-sm">
+              <span className="mr-1">🗑️</span> Delete
             </button>
           </div>
 
-          {/* Settings Panel */}
+          {/* TTS Settings */}
           <div className="panel">
             <div className="flex items-center gap-2 mb-4">
-              <Settings className="w-4 h-4 text-neon-purple" />
-              <h2 className="text-sm font-mono font-semibold text-gray-300 uppercase tracking-wider">
-                TTS Settings
+              <span className="text-lg">🎵</span>
+              <h2 className="text-sm font-display font-semibold text-ac-brown-dark uppercase tracking-wide">
+                Voice Settings
               </h2>
             </div>
 
@@ -436,21 +421,21 @@ function App() {
                   onChange={(e) => handleConfigChange('voice', e.target.value)}
                   className="input-field"
                 >
-                  <option value="zh-CN-YunxiaNeural">zh-CN-YunxiaNeural</option>
-                  <option value="zh-CN-XiaoxiaoNeural">zh-CN-XiaoxiaoNeural</option>
-                  <option value="zh-CN-YunyangNeural">zh-CN-YunyangNeural</option>
+                  <option value="zh-CN-YunxiaNeural">☁️ Yunxia</option>
+                  <option value="zh-CN-XiaoxiaoNeural">🌟 Xiaoxiao</option>
+                  <option value="zh-CN-YunyangNeural">☀️ Yunyang</option>
                 </select>
               </div>
 
               <div>
-                <label className="label">Rate: {config.rate}</label>
+                <label className="label">Speed: {config.rate}</label>
                 <input
                   type="range"
                   min="-50"
                   max="50"
                   value={parseInt(config.rate) || 0}
                   onChange={(e) => handleConfigChange('rate', `${e.target.value}%`)}
-                  className="w-full accent-neon-cyan"
+                  className="w-full accent-ac-leaf h-2 rounded-full"
                 />
               </div>
 
@@ -462,8 +447,39 @@ function App() {
                   max="50"
                   value={parseInt(config.pitch) || 0}
                   onChange={(e) => handleConfigChange('pitch', `${e.target.value}Hz`)}
-                  className="w-full accent-neon-purple"
+                  className="w-full accent-ac-gold h-2 rounded-full"
                 />
+              </div>
+
+              <div className="pt-4 border-t-2 border-ac-tan-light">
+                <label className="label mb-3">AI 模型</label>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleLlmModeChange('local')}
+                    className={`flex-1 py-2.5 px-3 rounded-2xl border-2 text-sm font-body font-bold transition-all ${
+                      llmMode === 'local'
+                        ? 'bg-ac-leaf/15 border-ac-leaf text-ac-leaf-dark shadow-ac-soft'
+                        : 'bg-white border-ac-tan-light text-ac-brown-light hover:border-ac-tan'
+                    }`}
+                  >
+                    <span className="block text-lg mb-0.5">🏠</span>
+                    本地
+                  </button>
+                  <button
+                    onClick={() => handleLlmModeChange('online')}
+                    className={`flex-1 py-2.5 px-3 rounded-2xl border-2 text-sm font-body font-bold transition-all ${
+                      llmMode === 'online'
+                        ? 'bg-ac-sky/15 border-ac-sky text-ac-sky shadow-ac-soft'
+                        : 'bg-white border-ac-tan-light text-ac-brown-light hover:border-ac-tan'
+                    }`}
+                  >
+                    <span className="block text-lg mb-0.5">☁️</span>
+                    DeepSeek
+                  </button>
+                </div>
+                <p className="text-[10px] text-ac-tan mt-2 text-center">
+                  {llmMode === 'online' ? '对话用 DeepSeek，记忆保持本地' : '全部使用本地模型'}
+                </p>
               </div>
             </div>
           </div>
@@ -471,19 +487,28 @@ function App() {
 
         {/* Middle Panel - Chat */}
         <div className="col-span-6">
-          <div className="panel h-[calc(100vh-220px)] flex flex-col">
-            <div className="flex items-center gap-2 mb-4 pb-4 border-b border-dark-border">
-              <MessageSquare className="w-4 h-4 text-neon-green" />
-              <h2 className="text-sm font-mono font-semibold text-gray-300 uppercase tracking-wider">
-                Conversation
+          <div className="panel h-[calc(100vh-200px)] flex flex-col" style={{
+            backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M30 5 Q35 0 40 5 Q45 0 50 5 Q55 10 50 15 L30 15 L10 15 Q5 10 10 5 Q15 0 20 5 Q25 0 30 5Z' fill='%237BC47F' opacity='0.04'/%3E%3C/svg%3E")`,
+            backgroundRepeat: 'repeat',
+          }}>
+            <div className="flex items-center gap-2 mb-4 pb-4 border-b-2 border-ac-tan-light">
+              <span className="text-lg">💬</span>
+              <h2 className="text-sm font-display font-semibold text-ac-brown-dark uppercase tracking-wide">
+                Chat
               </h2>
             </div>
 
-            <div className="flex-1 overflow-y-auto space-y-4 mb-4 pr-2">
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto space-y-4 mb-4 pr-1">
               {messages.length === 0 && (
-                <div className="text-center text-gray-500 font-mono text-sm py-12">
-                  <p>// Awaiting input...</p>
-                  <p className="text-xs mt-2">Press the microphone and start speaking</p>
+                <div className="text-center py-16 space-y-3">
+                  <div className="text-5xl animate-float">🏝️</div>
+                  <p className="text-ac-brown-light font-body font-semibold">
+                    来聊天吧！
+                  </p>
+                  <p className="text-xs text-ac-tan">
+                    打字或按话筒按钮开始对话
+                  </p>
                 </div>
               )}
 
@@ -492,39 +517,35 @@ function App() {
               ))}
             </div>
 
-            {/* Manual Text Input */}
-            <div className="flex gap-2 mb-4">
+            {/* Text Input */}
+            <div className="flex gap-2 mb-3">
               <input
                 type="text"
                 value={manualInput}
                 onChange={(e) => setManualInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSendManualInput()}
                 className="input-field flex-1"
-                placeholder="Type a message..."
+                placeholder="想说点什么？"
                 disabled={status !== STATES.IDLE}
               />
               <button
                 onClick={handleSendManualInput}
                 disabled={status !== STATES.IDLE || !manualInput.trim()}
-                className="px-4 py-2 bg-neon-cyan/20 border border-neon-cyan/50 text-neon-cyan font-mono text-sm rounded-lg hover:bg-neon-cyan/30 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                className="btn-primary p-3 rounded-2xl disabled:opacity-40"
               >
                 <Send className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Microphone Controls */}
-            <div className="pt-4 border-t border-dark-border">
-              <div className="flex items-center justify-center gap-6">
+            {/* Microphone */}
+            <div className="pt-4 border-t-2 border-ac-tan-light">
+              <div className="flex items-center justify-center gap-8">
                 {isRecording ? (
-                  <button
-                    onClick={stopRecording}
-                    className="relative group"
-                  >
-                    <div className="absolute inset-0 bg-red-500/30 rounded-full blur-xl animate-pulse" />
-                    <div className="relative w-20 h-20 bg-red-500/20 border-2 border-red-500 rounded-full flex items-center justify-center transition-all group-hover:bg-red-500/30">
-                      <Square className="w-8 h-8 text-red-500 fill-red-500" />
+                  <button onClick={stopRecording} className="relative group">
+                    <div className="w-20 h-20 bg-ac-error/15 border-2 border-ac-error/50 rounded-full flex items-center justify-center shadow-ac-button transition-all group-hover:scale-105 group-hover:bg-ac-error/25">
+                      <Square className="w-8 h-8 text-ac-error fill-ac-error/30" />
                     </div>
-                    <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 text-xs font-mono text-red-400 whitespace-nowrap">
+                    <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 text-xs font-body font-bold text-ac-error whitespace-nowrap">
                       STOP
                     </span>
                   </button>
@@ -534,25 +555,21 @@ function App() {
                     disabled={status !== STATES.IDLE}
                     className="relative group"
                   >
-                    <div className="absolute inset-0 bg-neon-cyan/30 rounded-full blur-xl animate-pulse" />
-                    <div className="relative w-20 h-20 bg-neon-cyan/10 border-2 border-neon-cyan rounded-full flex items-center justify-center transition-all group-hover:bg-neon-cyan/20 group-hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed">
-                      <Mic className="w-8 h-8 text-neon-cyan" />
+                    <div className="w-20 h-20 bg-ac-leaf/15 border-2 border-ac-leaf/40 rounded-full flex items-center justify-center shadow-ac-button transition-all group-hover:scale-110 group-hover:bg-ac-leaf/25 disabled:opacity-40 disabled:cursor-not-allowed">
+                      <Mic className="w-8 h-8 text-ac-leaf-dark" />
                     </div>
-                    <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 text-xs font-mono text-neon-cyan whitespace-nowrap">
-                      PUSH TO TALK
+                    <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 text-xs font-body font-bold text-ac-leaf-dark whitespace-nowrap">
+                      TALK
                     </span>
                   </button>
                 )}
 
                 {(status === STATES.PROCESSING || status === STATES.SPEAKING) && (
-                  <button
-                    onClick={handleCancel}
-                    className="relative group"
-                  >
-                    <div className="relative w-16 h-16 bg-gray-500/10 border-2 border-gray-500 rounded-full flex items-center justify-center transition-all group-hover:bg-gray-500/20">
-                      <Square className="w-6 h-6 text-gray-400" />
+                  <button onClick={handleCancel} className="relative group">
+                    <div className="w-16 h-16 bg-ac-tan/20 border-2 border-ac-tan rounded-full flex items-center justify-center transition-all group-hover:scale-105">
+                      <Square className="w-6 h-6 text-ac-brown-light" />
                     </div>
-                    <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 text-xs font-mono text-gray-400 whitespace-nowrap">
+                    <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 text-xs font-body font-semibold text-ac-brown-light whitespace-nowrap">
                       CANCEL
                     </span>
                   </button>
@@ -562,77 +579,86 @@ function App() {
           </div>
         </div>
 
-        {/* Right Panel - Status */}
-        <div className="col-span-3 space-y-6">
+        {/* Right Panel */}
+        <div className="col-span-3 space-y-5">
+          {/* Status Panel */}
           <div className="panel">
             <div className="flex items-center gap-2 mb-4">
-              <Volume2 className="w-4 h-4 text-neon-green" />
-              <h2 className="text-sm font-mono font-semibold text-gray-300 uppercase tracking-wider">
-                System Status
+              <span className="text-lg">📊</span>
+              <h2 className="text-sm font-display font-semibold text-ac-brown-dark uppercase tracking-wide">
+                Status
               </h2>
             </div>
 
-            <div className="space-y-3 text-xs font-mono">
-              <div className="flex justify-between">
-                <span className="text-gray-500">STATE</span>
-                <span className={`font-semibold ${
-                  status === STATES.IDLE ? 'text-gray-400' :
-                  status === STATES.LISTENING ? 'text-neon-cyan' :
-                  status === STATES.PROCESSING ? 'text-yellow-400' :
-                  'text-neon-purple'
+            <div className="space-y-3 text-sm font-body">
+              <div className="flex justify-between items-center py-1.5 px-3 rounded-xl bg-ac-warm/50">
+                <span className="text-ac-brown-light font-semibold text-xs">State</span>
+                <span className={`font-bold text-xs ${
+                  status === STATES.IDLE ? 'text-ac-idle' :
+                  status === STATES.LISTENING ? 'text-ac-active' :
+                  status === STATES.PROCESSING ? 'text-ac-amber' :
+                  'text-ac-sky'
                 }`}>
                   {status.toUpperCase()}
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-500">SESSION</span>
-                <span className="text-gray-400 truncate max-w-[120px]">{sessionId.current}</span>
+              <div className="flex justify-between items-center py-1.5 px-3 rounded-xl bg-ac-warm/50">
+                <span className="text-ac-brown-light font-semibold text-xs">Session</span>
+                <span className="text-ac-tan font-mono text-[10px] truncate max-w-[130px]">{sessionId.current}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-500">MESSAGES</span>
-                <span className="text-gray-400">{messages.length}</span>
+              <div className="flex justify-between items-center py-1.5 px-3 rounded-xl bg-ac-warm/50">
+                <span className="text-ac-brown-light font-semibold text-xs">Messages</span>
+                <span className="font-bold text-ac-leaf-dark">{messages.length}</span>
               </div>
             </div>
           </div>
 
+          {/* Quick Actions */}
           <div className="panel">
-            <h3 className="text-xs font-mono text-gray-500 uppercase tracking-wider mb-3">
-              Quick Actions
+            <h3 className="text-xs font-display text-ac-brown-light uppercase tracking-wide mb-3">
+              Actions
             </h3>
             <div className="space-y-2">
               <button
                 onClick={playFullAudio}
                 disabled={!hasAudio}
-                className="w-full py-2 px-4 bg-neon-green/10 border border-neon-green/30 rounded-lg text-xs font-mono text-neon-green hover:bg-neon-green/20 transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                className="w-full py-2.5 px-4 bg-ac-sky-light/50 border-2 border-ac-sky/30 rounded-2xl text-sm font-body font-bold text-ac-brown hover:bg-ac-sky-light hover:-translate-y-0.5 hover:shadow-ac-hover transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:translate-y-0 flex items-center justify-center gap-2"
               >
-                <Volume2 className="w-4 h-4" />
-                PLAY AUDIO
+                <span>🔊</span> Play Audio
               </button>
               <button
                 onClick={() => setMessages([])}
-                className="w-full py-2 px-4 bg-dark-bg border border-dark-border rounded-lg text-xs font-mono text-gray-400 hover:border-gray-500 transition-colors"
+                className="btn-ghost w-full text-sm flex items-center justify-center gap-2"
               >
-                CLEAR CHAT
+                <span>🧹</span> Clear Chat
               </button>
               <button
                 onClick={() => window.location.reload()}
-                className="w-full py-2 px-4 bg-dark-bg border border-dark-border rounded-lg text-xs font-mono text-gray-400 hover:border-gray-500 transition-colors"
+                className="btn-ghost w-full text-sm flex items-center justify-center gap-2"
               >
-                RELOAD APP
+                <span>🔄</span> Reload
               </button>
             </div>
           </div>
 
-          <div className="panel bg-gradient-to-br from-neon-cyan/5 to-neon-purple/5 border-neon-cyan/20">
-            <h3 className="text-xs font-mono text-neon-cyan uppercase tracking-wider mb-2">
-              Tip
-            </h3>
-            <p className="text-xs text-gray-400 font-mono leading-relaxed">
-              Press and hold the microphone button while speaking, then release to send your audio.
+          {/* Tip Card */}
+          <div className="panel bg-gradient-to-br from-ac-mint/20 via-ac-card to-ac-peach/20 border-ac-leaf/20">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-lg">💡</span>
+              <h3 className="text-xs font-display font-semibold text-ac-leaf-dark uppercase tracking-wide">
+                Tip
+              </h3>
+            </div>
+            <p className="text-xs text-ac-brown-light leading-relaxed">
+              Press the microphone button to talk, release to send your message.
+              You can also type messages in the text box below. 🍃
             </p>
           </div>
         </div>
       </div>
+
+      {/* Lion Mascot */}
+      <LionMascot />
     </div>
   );
 }

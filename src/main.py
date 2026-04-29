@@ -68,7 +68,8 @@ async def run_pipeline(
     websocket: ServerConnection,
     pending_turn: PendingTurn,
     asr: ASRClient,
-    llm: LLMClient,
+    chat_llm: LLMClient,
+    memory_llm: LLMClient,
     tts: TTSClient,
     voice_session,
     sm: StateMachine,
@@ -79,7 +80,8 @@ async def run_pipeline(
         websocket: WebSocket connection to ESP32
         pending_turn: The turn with accumulated audio chunks
         asr: ASR client for speech recognition
-        llm: LLM client for text generation
+        chat_llm: LLM client for text generation (conversation)
+        memory_llm: LLM client for memory summarization (always local)
         tts: TTS client for audio synthesis
         voice_session: VoiceSession for context management
         sm: State machine for tracking pipeline state
@@ -142,7 +144,7 @@ async def run_pipeline(
     tts_audio_buffer = bytearray()  # Accumulate TTS audio for WAV output
 
     try:
-        async for token in llm.stream_chat(messages):
+        async for token in chat_llm.stream_chat(messages):
             text_buffer += token
             full_llm_response += token
 
@@ -208,7 +210,7 @@ async def run_pipeline(
 
         # Add turn to memory system and trigger async summary
         voice_session.add_turn("user", user_text)
-        voice_session.add_turn("assistant", full_llm_response, voice_session, summarize_async)
+        voice_session.add_turn("assistant", full_llm_response, memory_llm, summarize_async)
 
         # Also persist to global memory on session_end
         # (summary will be written when session ends)
@@ -230,8 +232,8 @@ async def handle_esp32(websocket: ServerConnection) -> None:
     sm = StateMachine()
     voice_session = None  # Will be created on audio_start
 
-    # Create pipeline clients
-    asr, llm, tts = create_pipeline_clients(cfg)
+    # Create pipeline clients (chat_llm for conversation, memory_llm for summarization)
+    asr, chat_llm, memory_llm, tts = create_pipeline_clients(cfg)
 
     logger.info(f"ESP32 connected: {websocket.remote_address}")
 
@@ -282,7 +284,8 @@ async def handle_esp32(websocket: ServerConnection) -> None:
                         websocket,
                         sm.current_turn,
                         asr,
-                        llm,
+                        chat_llm,
+                        memory_llm,
                         tts,
                         voice_session,
                         sm,
@@ -308,7 +311,7 @@ async def handle_esp32(websocket: ServerConnection) -> None:
                 if voice_session:
                     # Force summarize remaining turns before cleanup
                     if voice_session.recent_turns:
-                        await voice_session.force_summarize(llm)
+                        await voice_session.force_summarize(memory_llm)
 
                     # Write session summary to global memory before cleanup
                     if voice_session.global_summary and voice_session.global_summary != "暂无早期记忆记录。":

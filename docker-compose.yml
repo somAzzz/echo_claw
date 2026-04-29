@@ -54,6 +54,7 @@ services:
       - ASR_BASE_URL=http://funasr-api:8001
       - PYTHONPATH=/app
       - DEBUG_OUTPUT_DIR=/tmp/voice-assistant-debug
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
     depends_on:
       funasr-api:
         condition: service_healthy

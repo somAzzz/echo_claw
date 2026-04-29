@@ -42,7 +42,7 @@ async def handle_browser(websocket: ServerConnection) -> None:
     cfg = Config.get_config()
 
     sm = StateMachine()
-    asr, llm, tts = create_pipeline_clients(cfg)
+    asr, chat_llm, memory_llm, tts = create_pipeline_clients(cfg)
 
     session_id = ""
     turn_id = 0
@@ -74,7 +74,7 @@ async def handle_browser(websocket: ServerConnection) -> None:
                     # Create/get voice session for this browser connection
                     if not voice_session:
                         voice_session = get_session(session_id or f"browser-{id(websocket)}")
-                    await run_browser_pipeline(websocket, sm, asr, llm, tts, session_id, turn_id, audio_chunks, voice_session)
+                    await run_browser_pipeline(websocket, sm, asr, chat_llm, tts, session_id, turn_id, audio_chunks, voice_session)
 
                 elif msg_type == "text_input":
                     # Extract session_id from message (not provided in text_input messages)
@@ -85,7 +85,7 @@ async def handle_browser(websocket: ServerConnection) -> None:
                         logger.info(f"text_input received: user_text='{user_text}', prompt='{prompt[:50] if prompt else 'empty'}...'")
                     if not voice_session:
                         voice_session = get_session(session_id or f"browser-{id(websocket)}")
-                    await run_text_pipeline(websocket, llm, tts, session_id, turn_id, user_text, prompt, voice_session, llm_client=llm)
+                    await run_text_pipeline(websocket, chat_llm, tts, session_id, turn_id, user_text, prompt, voice_session, llm_client=memory_llm)
 
                 elif msg_type == "cancel":
                     sm.handle_cancel()
