@@ -87,11 +87,10 @@ export default function LionMascot() {
   useEffect(() => {
     let timeout;
     const walk = () => {
-      const maxX = 100;
-      const maxY = 20;
-      const newX = (Math.random() - 0.5) * 2 * maxX;
-      const newY = (Math.random() - 0.5) * 2 * maxY;
-      setFacingRight(newX >= position.x);
+      // Only move left/up (negative x/y), never off-screen right/down
+      const newX = -(Math.random() * 180);  // move 0~180px left into page
+      const newY = -(Math.random() * 50);   // move 0~50px up into page
+      setFacingRight(Math.random() > 0.5);
       setBouncing(true);
       setPosition({ x: newX, y: newY });
       setTimeout(() => setBouncing(false), 400);
