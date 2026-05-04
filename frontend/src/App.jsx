@@ -134,12 +134,13 @@ function App() {
 
   const playFullAudio = useCallback(() => {
     const b64 = audioDataRef.current;
-    if (!b64) {
-      setHasAudio(false);
-      return;
+    if (!b64) return;
+
+    // Stop any currently playing audio
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
     }
-    audioDataRef.current = null;
-    setHasAudio(false);
 
     try {
       const binaryString = atob(b64);
@@ -147,9 +148,7 @@ function App() {
       for (let i = 0; i < binaryString.length; i++) {
         bytes[i] = binaryString.charCodeAt(i);
       }
-      if (!audioContextRef.current) {
-        audioContextRef.current = new AudioContext();
-      }
+      audioContextRef.current = new AudioContext();
       audioContextRef.current.decodeAudioData(
         bytes.buffer,
         (buffer) => {
@@ -159,10 +158,10 @@ function App() {
           source.start();
           source.onended = () => setStatus(STATES.IDLE);
         },
-        () => setHasAudio(false)
+        (err) => console.error('[Audio] decode error:', err)
       );
-    } catch {
-      setHasAudio(false);
+    } catch (err) {
+      console.error('[Audio] playback error:', err.message);
     }
   }, []);
 
