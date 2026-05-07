@@ -18,9 +18,10 @@ services:
               count: all
               capabilities: [gpu]
     command: >
-      --model google/gemma-4-4b-it
+      --model google/gemma-4-E4B-it
       --max-model-len 8192
       --gpu-memory-utilization 0.80
+      --speculative-config '{"model": "gg-hf-am/gemma-4-E4B-it-assistant", "num_speculative_tokens": 4}'
       --host 0.0.0.0
       --port 8000
     restart: unless-stopped
