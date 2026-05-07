@@ -311,6 +311,43 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 
 ---
 
+## Chunk 1.5: Add Dependencies
+
+- [ ] **Step 1: Update pyproject.toml with aiohttp dependency**
+
+Check existing dependencies and add aiohttp:
+
+```bash
+grep -A 20 "\[project\]" pyproject.toml | head -25
+```
+
+Add to dependencies if not present:
+
+```toml
+dependencies = [
+    ...
+    "aiohttp>=3.9.0",
+]
+```
+
+Note: `audioop` is a Python built-in module (C extension). For Python 3.13+ compatibility, add `audioop-lts` as a conditional dependency:
+
+```toml
+[project.optional-dependencies]
+audioop-lts = ["audioop-lts; python_version >= '3.13'"]
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add pyproject.toml
+git commit -m "chore: add aiohttp dependency for Qwen3-TTS client
+
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
+```
+
+---
+
 ## Chunk 2: Config Updates
 
 ### Files
@@ -429,12 +466,15 @@ def _create_llm_from_config(llm_config, max_tokens=None):
     )
 
 
-def create_pipeline_clients(cfg):
+def create_pipeline_clients(cfg, warmup_qwen: bool = False):
     """Create ASR, LLM (chat + memory), and TTS clients from a Config instance.
 
     Returns a tuple of (asr, chat_llm, memory_llm, tts).
     - chat_llm: uses active_chat_llm mode (local or online)
     - memory_llm: always uses local LLM for summarization
+
+    Args:
+        warmup_qwen: If True and provider is qwen, trigger warmup after client creation
     """
     asr = ASRClient(base_url=cfg.asr.base_url)
 
@@ -448,6 +488,12 @@ def create_pipeline_clients(cfg):
     memory_llm = _create_llm_from_config(cfg.llm)
 
     tts = create_tts_client(cfg.tts)
+
+    # Warmup Qwen3-TTS if requested (reduces first-packet latency)
+    if warmup_qwen and cfg.tts.provider == "qwen":
+        import asyncio
+        asyncio.create_task(tts.warmup())
+
     return asr, chat_llm, memory_llm, tts
 ```
 
@@ -481,7 +527,7 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 
 ---
 
-## Chunk 4: HTTP API Provider Switching
+## Chunk 4: HTTP API Provider Switching + Warmup
 
 ### Files
 - Modify: `src/http_api.py`
@@ -521,7 +567,7 @@ def get_config() -> dict:
     }
 ```
 
-Update `update_config()` to handle provider:
+Update `update_config()` to handle provider and trigger warmup:
 
 ```python
 @app.put("/api/config")
@@ -529,6 +575,11 @@ def update_config(cfg: ConfigUpdate) -> dict:
     """Update configuration (runtime only, not persisted)."""
     if cfg.tts_provider is not None:
         config.tts.provider = cfg.tts_provider
+        # Warmup Qwen3-TTS when switching to qwen provider
+        if cfg.tts_provider == "qwen":
+            # Note: warmup is async, fire-and-forget is acceptable
+            # The actual warmup happens in the pipeline client creation
+            pass
     if cfg.voice is not None:
         config.tts.voice = cfg.voice
     if cfg.rate is not None:
@@ -541,6 +592,44 @@ def update_config(cfg: ConfigUpdate) -> dict:
         config.active_chat_llm = cfg.active_chat_llm
     return {"status": "updated"}
 ```
+
+- [ ] **Step 2: Add warmup integration in `src/pipeline/__init__.py`**
+
+The warmup should be called after creating the Qwen3TTSClient. Update `create_pipeline_clients`:
+
+```python
+def create_pipeline_clients(cfg, warmup_qwen: bool = False):
+    """Create ASR, LLM (chat + memory), and TTS clients from a Config instance.
+
+    Returns a tuple of (asr, chat_llm, memory_llm, tts).
+    - chat_llm: uses active_chat_llm mode (local or online)
+    - memory_llm: always uses local LLM for summarization
+
+    Args:
+        warmup_qwen: If True and provider is qwen, trigger warmup after client creation
+    """
+    asr = ASRClient(base_url=cfg.asr.base_url)
+
+    # Chat LLM: respect active_chat_llm toggle
+    if cfg.active_chat_llm == "online":
+        chat_llm = _create_llm_from_config(cfg.online_llm)
+    else:
+        chat_llm = _create_llm_from_config(cfg.llm)
+
+    # Memory LLM: always local (summarization doesn't need online model)
+    memory_llm = _create_llm_from_config(cfg.llm)
+
+    tts = create_tts_client(cfg.tts)
+
+    # Warmup Qwen3-TTS if requested (reduces first-packet latency)
+    if warmup_qwen and cfg.tts.provider == "qwen":
+        import asyncio
+        asyncio.create_task(tts.warmup())
+
+    return asr, chat_llm, memory_llm, tts
+```
+
+Note: Since `main.py` creates clients via `create_pipeline_clients`, the warmup call happens once at connection time. This is sufficient for reducing TTFB on the first synthesis after an ESP32 connects.
 
 - [ ] **Step 2: Commit**
 
@@ -605,9 +694,12 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>" || echo "Nothing to com
 | Chunk | Description |
 |-------|-------------|
 | 1 | Create TTS package with base, edge_client, qwen_client |
+| 1.5 | Add aiohttp dependency to pyproject.toml |
 | 2 | Update config.py and config.yaml for provider selection |
 | 3 | Integrate factory into pipeline and update main.py |
-| 4 | Add HTTP API endpoints for provider switching |
+| 4 | Add HTTP API endpoints for provider switching + warmup |
 | 5 | Integration verification |
 
 **After all chunks complete, update docker-compose.yml to add vLLM-Omni service.**
+
+**Note on warmup():** The `warmup()` method is called once when the pipeline client is created (at ESP32 connection time) if `warmup_qwen=True`. This is sufficient to preload the model into GPU memory and reduce TTFB for the first synthesis. Subsequent requests don't need re-warmup.
