@@ -18,7 +18,7 @@ services:
               count: all
               capabilities: [gpu]
     command: >
-      --model google/gemma-4-2b-it
+      --model google/gemma-4-4b-it
       --max-model-len 8192
       --gpu-memory-utilization 0.80
       --host 0.0.0.0
@@ -54,7 +54,7 @@ services:
       - /tmp/voice-assistant-debug:/tmp/voice-assistant-debug
     environment:
       - LLM_BASE_URL=http://vllm-server:8000/v1
-      - LLM_MODEL=google/gemma-4-2b-it
+      - LLM_MODEL=google/gemma-4-E4B-it
       - ASR_BASE_URL=http://funasr-api:8001
       - PYTHONPATH=/app
       - DEBUG_OUTPUT_DIR=/tmp/voice-assistant-debug
