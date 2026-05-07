@@ -305,8 +305,7 @@ git commit -m "feat: add TTS package with strategy pattern
 - EdgeTTSClient (refactored from existing tts.py)
 - Qwen3TTSClient with vLLM-Omni support
 - Factory create_tts_client() function
-
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
+"
 ```
 
 ---
@@ -341,9 +340,7 @@ audioop-lts = ["audioop-lts; python_version >= '3.13'"]
 
 ```bash
 git add pyproject.toml
-git commit -m "chore: add aiohttp dependency for Qwen3-TTS client
-
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
+git commit -m "chore: add aiohttp dependency for Qwen3-TTS client"
 ```
 
 ---
@@ -431,9 +428,7 @@ git commit -m "feat: extend TTS config for provider selection and Qwen3-TTS
 
 - Add provider field (edge/qwen)
 - Add Qwen3-TTS configuration options
-- Support env vars for all settings
-
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
+- Support env vars for all settings"
 ```
 
 ---
@@ -520,9 +515,7 @@ git add src/pipeline/__init__.py src/main.py
 git commit -m "refactor: integrate TTS factory and rename synthesize to stream_audio
 
 - Use create_tts_client() factory in pipeline
-- Rename synthesize() to stream_audio() per BaseTTSClient interface
-
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
+- Rename synthesize() to stream_audio() per BaseTTSClient interface"
 ```
 
 ---
@@ -639,9 +632,7 @@ git commit -m "feat: add TTS provider switching via HTTP API
 
 - Add tts_provider field to ConfigUpdate
 - Include provider in GET /api/config response
-- Support runtime provider switching
-
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
+- Support runtime provider switching"
 ```
 
 ---
@@ -682,9 +673,7 @@ print(f'Qwen3TTSClient: {type(client).__name__}')
 - [ ] **Step 4: Commit integration verification**
 
 ```bash
-git add -A && git commit -m "chore: verify TTS factory integration
-
-Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>" || echo "Nothing to commit"
+git add -A && git commit -m "chore: verify TTS factory integration" || echo "Nothing to commit"
 ```
 
 ---
