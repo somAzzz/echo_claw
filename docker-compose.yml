@@ -9,6 +9,7 @@ services:
       - huggingface-cache:/root/.cache/huggingface
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
+      - HF_TOKEN=${HF_TOKEN}
     deploy:
       resources:
         reservations:
