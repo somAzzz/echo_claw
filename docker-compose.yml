@@ -55,7 +55,7 @@ services:
       - ./models:/app/models
       - /tmp/voice-assistant-debug:/tmp/voice-assistant-debug
     environment:
-      - LLM_BASE_URL=http://llama-server:8080/v1
+      - LLM_BASE_URL=http://vllm-server:8000/v1
       - LLM_MODEL=unsloth/gemma-4-E4B-it-GGUF:Q8_0
       - ASR_BASE_URL=http://funasr-api:8001
       - PYTHONPATH=/app
