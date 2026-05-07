@@ -1,8 +1,10 @@
 """Pipeline package - shared factory for creating pipeline clients."""
 
+import asyncio
+
 from .asr import ASRClient
 from .llm import LLMClient
-from .tts import TTSClient
+from .tts import create_tts_client
 
 
 def _create_llm_from_config(llm_config, max_tokens=None):
@@ -15,12 +17,13 @@ def _create_llm_from_config(llm_config, max_tokens=None):
     )
 
 
-def create_pipeline_clients(cfg):
+def create_pipeline_clients(cfg, warmup_qwen: bool = False):
     """Create ASR, LLM (chat + memory), and TTS clients from a Config instance.
 
     Returns a tuple of (asr, chat_llm, memory_llm, tts).
     - chat_llm: uses active_chat_llm mode (local or online)
     - memory_llm: always uses local LLM for summarization
+    - warmup_qwen: if True and using Qwen TTS, trigger warmup after client creation
     """
     asr = ASRClient(base_url=cfg.asr.base_url)
 
@@ -33,10 +36,11 @@ def create_pipeline_clients(cfg):
     # Memory LLM: always local (summarization doesn't need online model)
     memory_llm = _create_llm_from_config(cfg.llm)
 
-    tts = TTSClient(
-        voice=cfg.tts.voice,
-        rate=cfg.tts.rate,
-        pitch=cfg.tts.pitch,
-        volume=cfg.tts.volume,
-    )
+    # TTS via factory
+    tts = create_tts_client(cfg.tts)
+
+    # Warmup Qwen3-TTS if requested
+    if warmup_qwen and getattr(cfg.tts, 'provider', None) == "qwen":
+        asyncio.create_task(tts.warmup())
+
     return asr, chat_llm, memory_llm, tts
