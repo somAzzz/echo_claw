@@ -17,12 +17,10 @@ services:
               count: all
               capabilities: [gpu]
     command: >
-      --model cyankiwi/gemma-4-E4B-it-AWQ-INT8
+      cyankiwi/gemma-4-E4B-it-AWQ-INT8
       --quantization awq
       --max-model-len 8192
       --gpu-memory-utilization 0.80
-      --num-speculative-tokens 4
-      --speculative-model gg-hf-am/gemma-4-E4B-it-assistant
       --host 0.0.0.0
       --port 8000
     restart: unless-stopped
