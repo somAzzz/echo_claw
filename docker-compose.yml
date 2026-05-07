@@ -1,25 +1,30 @@
 services:
-  llama-server:
-    image: llama-cpp-sycl-server:latest
-    container_name: llama-server
+  vllm-server:
+    image: vllm/vllm-openai:latest
+    container_name: vllm-server
+    runtime: nvidia
     ports:
-      - "8080:8080"
+      - "8080:8000"
     volumes:
       - huggingface-cache:/root/.cache/huggingface
     environment:
-      - DEVICE=SYCL
-      - ONEAPI_DEVICE_SELECTOR=level_zero:0
-    devices:
-      - /dev/dri:/dev/dri
-    entrypoint: /bin/bash
+      - NVIDIA_VISIBLE_DEVICES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     command: >
-      -c "source /opt/intel/oneapi/setvars.sh --force 2>&1 && exec /app/llama-server \
-      --host 0.0.0.0 \
-      --port 8080 \
-      -hf unsloth/gemma-4-E4B-it-GGUF:Q8_0 \
-      -ngl 999 \
-      --flash-attn on\
-      -c 4096"
+      --model cyankiwi/gemma-4-E4B-it-AWQ-INT8
+      --quantization awq
+      --max-model-len 8192
+      --gpu-memory-utilization 0.80
+      --num-speculative-tokens 4
+      --speculative-model gg-hf-am/gemma-4-E4B-it-assistant
+      --host 0.0.0.0
+      --port 8000
     restart: unless-stopped
 
   funasr-api:
