@@ -9,8 +9,8 @@ server:
 prompt_dir: "./prompts"
 
 llm:
-  base_url: "http://llama-server:8080/v1"
-  model: "unsloth/gemma-4-E4B-it-GGUF:Q8_0"
+  base_url: "http://vllm-server:8000/v1"
+  model: "google/gemma-4-E4B-it"
   max_tokens: 131072
   temperature: 0.7
 

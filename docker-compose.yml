@@ -1,25 +1,28 @@
 services:
-  llama-server:
-    image: llama-cpp-sycl-server:latest
-    container_name: llama-server
+  vllm-server:
+    image: vllm/vllm-openai:latest
+    container_name: vllm-server
+    runtime: nvidia
     ports:
-      - "8080:8080"
+      - "8080:8000"
     volumes:
       - huggingface-cache:/root/.cache/huggingface
     environment:
-      - DEVICE=SYCL
-      - ONEAPI_DEVICE_SELECTOR=level_zero:0
-    devices:
-      - /dev/dri:/dev/dri
-    entrypoint: /bin/bash
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HF_TOKEN=${HF_TOKEN}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     command: >
-      -c "source /opt/intel/oneapi/setvars.sh --force 2>&1 && exec /app/llama-server \
-      --host 0.0.0.0 \
-      --port 8080 \
-      -hf unsloth/gemma-4-E4B-it-GGUF:Q8_0 \
-      -ngl 999 \
-      --flash-attn on\
-      -c 4096"
+      --model google/gemma-4-E4B-it
+      --max-model-len 8192
+      --gpu-memory-utilization 0.80
+      --host 0.0.0.0
+      --port 8000
     restart: unless-stopped
 
   funasr-api:
@@ -50,8 +53,8 @@ services:
       - ./models:/app/models
       - /tmp/voice-assistant-debug:/tmp/voice-assistant-debug
     environment:
-      - LLM_BASE_URL=http://llama-server:8080/v1
-      - LLM_MODEL=unsloth/gemma-4-E4B-it-GGUF:Q8_0
+      - LLM_BASE_URL=http://vllm-server:8000/v1
+      - LLM_MODEL=google/gemma-4-E4B-it
       - ASR_BASE_URL=http://funasr-api:8001
       - PYTHONPATH=/app
       - DEBUG_OUTPUT_DIR=/tmp/voice-assistant-debug
