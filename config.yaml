@@ -34,10 +34,19 @@ asr:
   joiner: "./models/asr/joiner.onnx"
 
 tts:
-  voice: "zh-CN-YunxiaNeural"
+  provider: "edge"  # "edge" or "qwen"
+
+  # Edge TTS settings
+  voice: "zh-CN-XiaoxiaoNeural"
   rate: "-20%"
   pitch: "+13Hz"
   volume: "+0%"
+
+  # Qwen3-TTS settings (via vLLM-Omni)
+  qwen_api_base: "http://qwen-tts-vllm:8000/v1"
+  qwen_model: "Qwen3-TTS-12Hz-1.7B-CustomVoice"
+  qwen_voice: "Awesome_Sally"
+  qwen_sample_rate: 24000
 
 kws:
   model_dir: "./models/kws"
