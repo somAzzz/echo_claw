@@ -51,10 +51,18 @@ class LLMClient:
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=300)
             ) as resp:
+                logger.info(f"LLM request sent, response status: {resp.status}")
+                if resp.status != 200:
+                    error_body = await resp.text()
+                    logger.error(f"LLM error response: {error_body[:500]}")
+                    return
                 async for line in resp.content:
                     line = line.decode("utf-8").strip()
-                    if not line or line == "data: [DONE]":
+                    if not line:
                         continue
+                    if line == "data: [DONE]":
+                        logger.info("LLM stream done")
+                        break
                     if line.startswith("data: "):
                         try:
                             data = json.loads(line[6:])
@@ -63,6 +71,7 @@ class LLMClient:
                             reasoning = delta.get("reasoning_content", "")
                             # Only yield actual content, not reasoning
                             if content:
+                                logger.info(f"LLM token: {repr(content)}")
                                 yield content
                             elif reasoning and not content:
                                 # Skip reasoning content
