@@ -42,12 +42,22 @@ class OnlineLLMConfig:
 
 @dataclass
 class TTSConfig:
-    """TTS configuration for edge-tts."""
-    voice: str = "zh-CN-YunxiaNeural"
+    """TTS configuration supporting multiple providers."""
+    # Provider selection
+    provider: str = "edge"  # "edge" or "qwen"
+
+    # Edge TTS settings
+    voice: str = "zh-CN-XiaoxiaoNeural"
     rate: str = "-20%"
     pitch: str = "+13Hz"
     volume: str = "+0%"
     sample_rate: int = 16000
+
+    # Qwen3-TTS settings
+    qwen_api_base: str = "http://localhost:8000/v1"
+    qwen_model: str = "Qwen3-TTS-12Hz-1.7B-CustomVoice"
+    qwen_voice: str = "Awesome_Sally"
+    qwen_sample_rate: int = 24000
 
 
 @dataclass
@@ -151,11 +161,16 @@ class Config:
         # Load TTS config
         tts_data = yaml_data.get("tts", {})
         tts = TTSConfig(
-            voice=os.environ.get("TTS_VOICE", tts_data.get("voice", "zh-CN-YunxiaNeural")),
-            rate=os.environ.get("TTS_RATE", tts_data.get("rate", "-42%")),
+            provider=os.environ.get("TTS_PROVIDER", tts_data.get("provider", "edge")),
+            voice=os.environ.get("TTS_VOICE", tts_data.get("voice", "zh-CN-XiaoxiaoNeural")),
+            rate=os.environ.get("TTS_RATE", tts_data.get("rate", "-20%")),
             pitch=os.environ.get("TTS_PITCH", tts_data.get("pitch", "+13Hz")),
             volume=os.environ.get("TTS_VOLUME", tts_data.get("volume", "+0%")),
             sample_rate=int(os.environ.get("TTS_SAMPLE_RATE", tts_data.get("sample_rate", 16000))),
+            qwen_api_base=os.environ.get("QWEN_TTS_API_BASE", tts_data.get("qwen_api_base", "http://localhost:8000/v1")),
+            qwen_model=os.environ.get("QWEN_TTS_MODEL", tts_data.get("qwen_model", "Qwen3-TTS-12Hz-1.7B-CustomVoice")),
+            qwen_voice=os.environ.get("QWEN_TTS_VOICE", tts_data.get("qwen_voice", "Awesome_Sally")),
+            qwen_sample_rate=int(os.environ.get("QWEN_TTS_SAMPLE_RATE", tts_data.get("qwen_sample_rate", 24000))),
         )
 
         # Load Memory config

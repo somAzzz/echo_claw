@@ -19,7 +19,7 @@ import logging
 import os
 import threading
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 import websockets
 from websockets import ServerConnection
@@ -28,7 +28,7 @@ from src.config import Config
 from src.http_api import app as http_app
 from src.browser_ws_handler import handle_browser
 from src.memory import get_session, cleanup_session, summarize_async, get_global_memory, get_cached_soul_prompt
-from src.pipeline import create_pipeline_clients, ASRClient, LLMClient, TTSClient
+from src.pipeline import create_pipeline_clients, ASRClient, LLMClient
 from src.protocol.ws_protocol import (
     build_error,
     build_state_directive,
@@ -70,7 +70,7 @@ async def run_pipeline(
     asr: ASRClient,
     chat_llm: LLMClient,
     memory_llm: LLMClient,
-    tts: TTSClient,
+    tts: Any,
     voice_session,
     sm: StateMachine,
 ) -> None:
@@ -167,7 +167,7 @@ async def run_pipeline(
                     first_chunk_sent = True
 
                 # Send TTS audio chunks and accumulate (text already filtered above)
-                async for audio_chunk in tts.synthesize(text_to_speak):
+                async for audio_chunk in tts.stream_audio(text_to_speak):
                     await send_binary(websocket, audio_chunk)
                     tts_audio_buffer.extend(audio_chunk)
 
@@ -176,7 +176,7 @@ async def run_pipeline(
         # Send any remaining text (filter emojis first)
         if text_buffer and first_chunk_sent:
             text_to_speak = filter_tts_text(text_buffer)
-            async for audio_chunk in tts.synthesize(text_to_speak):
+            async for audio_chunk in tts.stream_audio(text_to_speak):
                 await send_binary(websocket, audio_chunk)
                 tts_audio_buffer.extend(audio_chunk)
 
@@ -233,7 +233,7 @@ async def handle_esp32(websocket: ServerConnection) -> None:
     voice_session = None  # Will be created on audio_start
 
     # Create pipeline clients (chat_llm for conversation, memory_llm for summarization)
-    asr, chat_llm, memory_llm, tts = create_pipeline_clients(cfg)
+    asr, chat_llm, memory_llm, tts = create_pipeline_clients(cfg, warmup_qwen=False)
 
     logger.info(f"ESP32 connected: {websocket.remote_address}")
 

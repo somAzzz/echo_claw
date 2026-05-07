@@ -304,8 +304,7 @@ git commit -m "feat: add TTS package with strategy pattern
 - BaseTTSClient abstract interface
 - EdgeTTSClient (refactored from existing tts.py)
 - Qwen3TTSClient with vLLM-Omni support
-- Factory create_tts_client() function
-"
+- Factory create_tts_client() function"
 ```
 
 ---

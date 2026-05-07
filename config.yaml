@@ -9,8 +9,8 @@ server:
 prompt_dir: "./prompts"
 
 llm:
-  base_url: "http://llama-server:8080/v1"
-  model: "unsloth/gemma-4-E4B-it-GGUF:Q8_0"
+  base_url: "http://vllm-server:8000/v1"
+  model: "google/gemma-4-E4B-it"
   max_tokens: 131072
   temperature: 0.7
 
@@ -34,10 +34,19 @@ asr:
   joiner: "./models/asr/joiner.onnx"
 
 tts:
-  voice: "zh-CN-YunxiaNeural"
+  provider: "edge"  # "edge" or "qwen"
+
+  # Edge TTS settings
+  voice: "zh-CN-XiaoxiaoNeural"
   rate: "-20%"
   pitch: "+13Hz"
   volume: "+0%"
+
+  # Qwen3-TTS settings (via vLLM-Omni)
+  qwen_api_base: "http://qwen-tts-vllm:8000/v1"
+  qwen_model: "Qwen3-TTS-12Hz-1.7B-CustomVoice"
+  qwen_voice: "Awesome_Sally"
+  qwen_sample_rate: 24000
 
 kws:
   model_dir: "./models/kws"

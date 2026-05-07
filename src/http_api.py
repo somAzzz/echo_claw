@@ -22,6 +22,7 @@ class PromptUpdate(BaseModel):
 
 
 class ConfigUpdate(BaseModel):
+    tts_provider: str = None
     voice: str = None
     rate: str = None
     pitch: str = None
@@ -99,6 +100,7 @@ def get_config() -> dict:
     """Get current configuration."""
     return {
         "tts": {
+            "provider": config.tts.provider,
             "voice": config.tts.voice,
             "rate": config.tts.rate,
             "pitch": config.tts.pitch,
@@ -114,6 +116,8 @@ def get_config() -> dict:
 @app.put("/api/config")
 def update_config(cfg: ConfigUpdate) -> dict:
     """Update configuration (runtime only, not persisted)."""
+    if cfg.tts_provider is not None:
+        config.tts.provider = cfg.tts_provider
     if cfg.voice is not None:
         config.tts.voice = cfg.voice
     if cfg.rate is not None:
