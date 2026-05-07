@@ -67,12 +67,54 @@ class BaseTTSClient(ABC):
 **重采样策略**：
 ```python
 # 使用 audioop.ratecv 保持跨 chunk 状态，避免爆音
+# 注意：确保 chunk 字节数为 2 的倍数，避免 audioop 报错
+chunk = chunk[:len(chunk) - (len(chunk) % 2)]  # 字节对齐
 resampled_chunk, resample_state = audioop.ratecv(
     chunk, 2, 1,  # 16bit, mono
-    24000,        # 输入采样率
-    16000,        # 输出采样率
+    detected_rate, # 动态检测或配置指定
+    16000,         # 输出采样率
     resample_state
 )
+```
+
+**WAV Header 自动检测**：
+```python
+# 检测 WAV 格式（RIFF header）
+if chunk[:4] == b'RIFF':
+    # 解析 WAV header 提取真实采样率
+    sample_rate = struct.unpack('<I', chunk[24:28])[0]
+    channels = struct.unpack('<H', chunk[22:24])[0]
+    skip_bytes = 44  # 标准 WAV header 大小
+```
+
+**预热机制（TTFB 优化）**：
+```python
+async def warmup(self):
+    """预热模型，减少首次推理延迟"""
+    await self._session.post(
+        f"{self.base_url}/v1/audio/speech",
+        json={
+            "model": self.model,
+            "input": " ",
+            "voice": self.voice,
+            "response_format": "pcm",
+        }
+    )
+```
+
+**中断处理**：
+```python
+async def stream_audio(self, text: str) -> AsyncGenerator[bytes, None]:
+    async with aiohttp.ClientSession() as session:
+        response = await session.post(url, json=payload)
+        try:
+            async for chunk in response.content.iter_chunked(4800):
+                # ...
+                yield resampled_chunk
+        except asyncio.CancelledError:
+            # 用户打断时，确保关闭连接释放资源
+            response.close()
+            raise
 ```
 
 ### 5. 工厂模式
@@ -176,11 +218,15 @@ Content-Type: application/json
 
 ### 注意事项
 
-1. **WAV Header 处理**：某些实现可能返回 WAV 而非裸 PCM。检测到 header 时跳过前 44 字节。
+1. **WAV Header 处理**：某些实现可能返回 WAV 而非裸 PCM。检测到 RIFF 标记时自动跳过前 44 字节，并从 header 解析真实采样率。
 
 2. **Chunk 大小**：建议 4800 字节（2400 采样点 × 2 字节），可被原采样率整除，重采样效果最佳。
 
-3. **首包延迟**：vLLM-Omni 首次推理有初始化开销，可通过预热或配置 buffer 策略缓解。
+3. **首包延迟（TTFB）**：vLLM-Omni 首次推理有初始化开销。系统启动或首次使用时发送空白文本预热模型。
+
+4. **字节对齐**：audioop 要求输入数据字节数为 2 的倍数，最后一个 chunk 不足时需裁剪。
+
+5. **中断取消**：aiohttp 响应需在 CancelledError 时显式 close()，否则连接持续占用 GPU 生成无用音频。
 
 ## 扩展预留
 
@@ -265,4 +311,7 @@ dependencies = [
 |------|---------|
 | vLLM-Omni API 差异 | 预留适配层，支持多种响应格式检测 |
 | 重采样爆音 | 使用 audioop 状态保持，或预录测试音频验证 |
-| 首包延迟过高 | 提供配置项，允许调整 buffer 策略 |
+| 首包延迟过高 | 系统启动时预热模型（warmup），发送空白文本激活 GPU 计算单元 |
+| 字节对齐错误 | 确保每 chunk 字节数为 2 的倍数后再送入 audioop |
+| 用户打断时后台继续生成 | 捕获 CancelledError，显式关闭 aiohttp 连接，释放 4090 算力 |
+| 模型采样率变更 | 自动从 WAV Header 解析采样率，配置变更时无需改代码 |
