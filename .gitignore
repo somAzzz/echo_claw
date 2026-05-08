@@ -27,6 +27,6 @@ models/examples/
 models/sherpa-*/
 models/tts/
 node_modules/
-
+*.lock
 .env.example
 

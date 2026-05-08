@@ -1,6 +1,8 @@
 services:
   vllm-server:
-    image: vllm/vllm-openai:latest
+    build:
+      context: .
+      dockerfile: llm-server.Dockerfile
     container_name: vllm-server
     runtime: nvidia
     ports:
@@ -18,26 +20,65 @@ services:
               count: all
               capabilities: [gpu]
     command: >
-      --model google/gemma-4-E4B-it
+      --model cyankiwi/gemma-4-E4B-it-AWQ-INT8
       --max-model-len 8192
-      --gpu-memory-utilization 0.80
+      --gpu-memory-utilization 0.35
       --host 0.0.0.0
       --port 8000
     restart: unless-stopped
 
-  funasr-api:
+  asr-server:
     build:
-      context: ./funasr_api
-      dockerfile: Dockerfile
-    container_name: funasr-api
+      context: .
+      dockerfile: asr-server.Dockerfile
+    container_name: asr-server
+    runtime: nvidia
     ports:
-      - "8001:8001"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+      - "8001:8000"
+    volumes:
+      - huggingface-cache:/root/.cache/huggingface
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HF_TOKEN=${HF_TOKEN}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command: >
+      --model Qwen/Qwen3-ASR-0.6B
+      --host 0.0.0.0
+      --port 8000
+      --gpu-memory-utilization 0.12
+      --max-model-len 4096
+    restart: unless-stopped
+
+  qwen-tts-vllm:
+    image: vllm/vllm-omni:v0.18.0
+    container_name: qwen-tts-vllm
+    runtime: nvidia
+    ports:
+      - "8002:8000"
+    volumes:
+      - huggingface-cache:/root/.cache/huggingface
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HF_TOKEN=${HF_TOKEN}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command: >
+      --model Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice
+      --host 0.0.0.0
+      --port 8000
+      --gpu-memory-utilization 0.15
+      --max-model-len 2048
     restart: unless-stopped
 
   python-hub:
@@ -54,15 +95,13 @@ services:
       - /tmp/voice-assistant-debug:/tmp/voice-assistant-debug
     environment:
       - LLM_BASE_URL=http://vllm-server:8000/v1
-      - LLM_MODEL=google/gemma-4-E4B-it
-- LLM_MAX_TOKENS=7000
-      - ASR_BASE_URL=http://funasr-api:8001
+      - LLM_MODEL=cyankiwi/gemma-4-E4B-it-AWQ-INT8
+      - LLM_MAX_TOKENS=7000
+      - ASR_BASE_URL=http://asr-server:8000/v1
+      - QWEN_TTS_API_BASE=http://qwen-tts-vllm:8000/v1
       - PYTHONPATH=/app
       - DEBUG_OUTPUT_DIR=/tmp/voice-assistant-debug
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-    depends_on:
-      funasr-api:
-        condition: service_healthy
     mem_limit: 2g
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8766/api/status')"]

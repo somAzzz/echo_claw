@@ -4,7 +4,7 @@ import asyncio
 
 from .asr import ASRClient
 from .llm import LLMClient
-from .tts import create_tts_client
+from .tts import create_tts_client, TTSClient
 
 
 def _create_llm_from_config(llm_config, max_tokens=None):

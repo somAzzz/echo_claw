@@ -10,7 +10,7 @@ prompt_dir: "./prompts"
 
 llm:
   base_url: "http://vllm-server:8000/v1"
-  model: "google/gemma-4-E4B-it"
+  model: "cyankiwi/gemma-4-E4B-it-AWQ-INT8"
   max_tokens: 131072
   temperature: 0.7
 
@@ -25,13 +25,10 @@ online_llm:
 # Active LLM for chat: "local" or "online"
 active_chat_llm: "local"
 
-# 本地开发使用本地模型路径，Docker部署时使用 /app/models/*
 asr:
-  model_dir: "./models/asr"
-  tokens: "./models/asr/tokens.txt"
-  encoder: "./models/asr/encoder.onnx"
-  decoder: "./models/asr/decoder.onnx"
-  joiner: "./models/asr/joiner.onnx"
+  base_url: "http://asr-server:8000/v1"
+  model: "Qwen/Qwen3-ASR-0.6B"
+  sample_rate: 16000
 
 tts:
   provider: "edge"  # "edge" or "qwen"
@@ -44,22 +41,9 @@ tts:
 
   # Qwen3-TTS settings (via vLLM-Omni)
   qwen_api_base: "http://qwen-tts-vllm:8000/v1"
-  qwen_model: "Qwen3-TTS-12Hz-1.7B-CustomVoice"
+  qwen_model: "Qwen3-TTS-12Hz-0.6B-CustomVoice"
   qwen_voice: "Awesome_Sally"
   qwen_sample_rate: 24000
-
-kws:
-  model_dir: "./models/kws"
-  tokens: "./models/kws/tokens.txt"
-  encoder: "./models/kws/encoder.onnx"
-  decoder: "./models/kws/decoder.onnx"
-  joiner: "./models/kws/joiner.onnx"
-  keywords_file: "./models/kws/keywords.txt"
-  threshold: 0.5  # 唤醒置信度阈值
-
-vad:
-  model_dir: "./models/vad"
-  silence_threshold: 0.8  # 秒，持续静音时长触发截断
 
 memory:
   # Rolling summary memory configuration (dual-track architecture)
